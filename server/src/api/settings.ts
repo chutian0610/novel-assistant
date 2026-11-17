@@ -4,6 +4,7 @@ import type { DB } from '../db/open';
 import { resolveRoute } from '../llm/resolver';
 import { PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
 import { HttpError } from './errors';
+import { parseBody, parseId, readJson } from './validate';
 
 interface ProviderRow {
   id: number;
@@ -181,28 +182,6 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
-}
-
-async function readJson(c: { req: { json(): Promise<unknown> } }): Promise<unknown> {
-  return c.req.json().catch(() => {
-    throw new HttpError(400, '请求体缺失或不是合法 JSON');
-  });
-}
-
-function parseBody<T>(schema: z.ZodType<T>, body: unknown): T {
-  const result = schema.safeParse(body);
-  if (!result.success) {
-    const issue = result.error.issues[0];
-    const field = issue && issue.path.length > 0 ? issue.path.join('.') : 'body';
-    throw new HttpError(400, issue ? `参数 ${field}：${issue.message}` : '请求体不合法');
-  }
-  return result.data;
-}
-
-function parseId(raw: string): number {
-  const id = Number(raw);
-  if (!Number.isInteger(id) || id <= 0) throw new HttpError(400, `非法的 id：${raw}`);
-  return id;
 }
 
 function parseTask(raw: string): TaskType {

@@ -38,3 +38,41 @@ export interface RouteTestResult {
   baseUrl: string | null;
   error?: string;
 }
+
+// 素材四类：与 server/src/materials/store.ts 为镜像副本，增删类型须两处同步
+export type MaterialType = 'setting' | 'trope' | 'style' | 'skeleton';
+
+export const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
+  setting: '设定卡',
+  trope: '桥段',
+  style: '文风样本',
+  skeleton: '书骨骼',
+};
+
+export interface MaterialSource {
+  kind: 'manual' | 'reference';
+  book: string;
+  chapter: string;
+}
+
+export interface Material {
+  id: number;
+  type: MaterialType;
+  title: string;
+  content: string;
+  payload: Record<string, string>;
+  tags: string[];
+  source: MaterialSource;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MaterialListResponse {
+  items: Material[];
+  total: number;
+}
+
+export interface TagCount {
+  name: string;
+  count: number;
+}

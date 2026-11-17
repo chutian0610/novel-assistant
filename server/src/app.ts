@@ -3,6 +3,7 @@ import type { DB } from './db/open';
 import type { LLMProvider } from './llm/types';
 import { healthRoutes } from './api/health';
 import { settingsRoutes } from './api/settings';
+import { materialsRoutes } from './api/materials';
 import { errorHandler, requestLogger } from './api/middleware';
 
 export interface AppDeps {
@@ -17,6 +18,7 @@ export function createApp(deps: AppDeps) {
   app.onError(errorHandler);
   app.route('/', healthRoutes());
   app.route('/api/settings', settingsRoutes(deps));
+  app.route('/api', materialsRoutes(deps));
   app.notFound((c) => c.json({ error: '接口不存在' }, 404));
   return app;
 }
