@@ -338,3 +338,190 @@ h3 {
 .empty {
   padding: 20px 0;
 }
+
+/* ---- 筛选栏（素材库） ---- */
+.filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.filter-bar .select {
+  width: auto;
+  min-width: 130px;
+}
+.filter-search {
+  flex: 1;
+  min-width: 200px;
+}
+.filter-create {
+  margin-left: auto;
+}
+
+/* ---- 素材卡片 ---- */
+.material-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.material-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 12px 16px;
+}
+.material-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.material-title {
+  font-size: 15px;
+  margin: 0;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.material-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.badge-type {
+  background: #eef3fe;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.material-content {
+  margin: 8px 0 4px;
+  white-space: pre-wrap;
+}
+.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.material-payload {
+  margin: 4px 0;
+  font-family: inherit;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.material-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+.foot-time {
+  margin-left: auto;
+}
+.load-more {
+  text-align: center;
+  margin-top: 12px;
+}
+
+/* ---- 标签 chips ---- */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: #f0f1f3;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 1px 10px;
+  border-radius: 999px;
+}
+.chip-static {
+  cursor: default;
+}
+.chip-remove {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+}
+.chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fff;
+}
+.chip-input {
+  flex: 1;
+  min-width: 140px;
+  border: none;
+  outline: none;
+  padding: 2px;
+}
+.chip-input:focus {
+  outline: none;
+}
+
+/* ---- 素材编辑器（模态） ---- */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 22, 30, 0.45);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 40px 16px;
+  overflow-y: auto;
+  z-index: 10;
+}
+.modal-panel {
+  background: var(--panel);
+  border-radius: var(--radius);
+  width: 100%;
+  max-width: 640px;
+  padding: 18px 22px;
+  box-shadow: 0 12px 40px rgba(15, 22, 30, 0.25);
+}
+.editor-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+.editor-label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+.editor-label textarea.input {
+  resize: vertical;
+}
+.editor-section {
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.editor-section-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.required-mark {
+  color: var(--danger);
+}
+.source-row {
+  display: flex;
+  gap: 18px;
+}
+.source-row .checkbox-label {
+  flex-direction: row;
+}
