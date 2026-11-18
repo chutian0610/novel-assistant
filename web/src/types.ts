@@ -76,3 +76,38 @@ export interface TagCount {
   name: string;
   count: number;
 }
+
+// ---- 书架（与 server/src/books/store.ts 为镜像副本，增删字段须两处同步） ----
+
+export interface Book {
+  id: number;
+  title: string;
+  /** 书契约元数据：题材/基调/承诺 */
+  genre: string;
+  tone: string;
+  promise: string;
+  materialCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BookListResponse {
+  items: Book[];
+  total: number;
+}
+
+/** 书内素材条目：全局素材实时引用 + 覆写补丁合并出的生效视图 */
+export interface BookMaterialItem {
+  materialId: number;
+  addedAt: string;
+  updatedAt: string;
+  material: Material;
+  effective: { title: string; content: string; payload: Record<string, string> };
+  /** 被覆写的字段点路径（已排序），如 ['content', 'payload.category'] */
+  overriddenFields: string[];
+}
+
+export interface BookMaterialListResponse {
+  items: BookMaterialItem[];
+  total: number;
+}

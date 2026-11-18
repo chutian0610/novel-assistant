@@ -147,3 +147,36 @@ export async function seedMaterial(
   if (res.status !== 201) throw new Error(`预置素材失败：${res.status} ${JSON.stringify(res.body)}`);
   return res.body;
 }
+
+/** 书 JSON 形状与 server 的 BookRecord 同构，直接复用其类型 */
+export type TestBook = import('../src/books/store').BookRecord;
+
+/** 通过 API 预置一本书（书契约元数据：题材/基调/承诺） */
+export async function seedBook(
+  request: TestEnv['request'],
+  overrides: Partial<Pick<TestBook, 'title' | 'genre' | 'tone' | 'promise'>> = {}
+): Promise<TestBook> {
+  const res = await request.post('/api/books', {
+    title: '北境玄天录',
+    genre: '东方玄幻',
+    tone: '热血爽文',
+    promise: '主角稳步升级，无虐主，伏笔必回收',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置书失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 书内素材条目 JSON 形状与 server 的 BookMaterialRecord 同构 */
+export type TestBookMaterialItem = import('../src/books/store').BookMaterialRecord;
+
+/** 通过 API 把素材引用进书 */
+export async function seedBookMaterial(
+  request: TestEnv['request'],
+  bookId: number,
+  materialId: number
+): Promise<TestBookMaterialItem> {
+  const res = await request.post(`/api/books/${bookId}/materials`, { materialId });
+  if (res.status !== 201) throw new Error(`预置书内引用失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}

@@ -21,21 +21,27 @@ import { parseBody, parseId, parsePaginationInt, readJson } from './validate';
  * 各类型素材的结构化字段 schema（与 web/src/materialSchema.ts 的表单定义保持镜像同步）。
  * payload 用 .strict()：未知字段直接拒绝，保证各类型 schema 边界清晰。
  */
-const payloadSchemas: Record<MaterialType, z.ZodType> = {
+/** 各类型 payload 的合法键与单字段校验；书内覆写（api/books.ts）按键部分校验复用同一份定义 */
+export const payloadFieldSchemas: Record<MaterialType, Record<string, z.ZodString>> = {
   // 设定卡：领域分类（世界观/人物/物品/势力/地点等，自由文本便于扩展）
-  setting: z.object({ category: z.string().trim().max(100).optional() }).strict(),
+  setting: { category: z.string().trim().max(100) },
   // 桥段：冲突模式、名场面结构、钩子/反转如何展开
-  trope: z.object({ structure: z.string().trim().max(5000).optional() }).strict(),
+  trope: { structure: z.string().trim().max(5000) },
   // 文风样本：句式节奏说明
-  style: z.object({ rhythm: z.string().trim().max(5000).optional() }).strict(),
+  style: { rhythm: z.string().trim().max(5000) },
   // 书骨骼：节奏曲线 / 卷纲结构 / 人物原型（验收必备三字段）
-  skeleton: z
-    .object({
-      pacingCurve: z.string().trim().min(1, '节奏曲线不能为空').max(10000),
-      volumeStructure: z.string().trim().min(1, '卷纲结构不能为空').max(10000),
-      archetypes: z.string().trim().min(1, '人物原型不能为空').max(10000),
-    })
-    .strict(),
+  skeleton: {
+    pacingCurve: z.string().trim().min(1, '节奏曲线不能为空').max(10000),
+    volumeStructure: z.string().trim().min(1, '卷纲结构不能为空').max(10000),
+    archetypes: z.string().trim().min(1, '人物原型不能为空').max(10000),
+  },
+};
+
+const payloadSchemas: Record<MaterialType, z.ZodType> = {
+  setting: z.object(payloadFieldSchemas.setting).strict(),
+  trope: z.object(payloadFieldSchemas.trope).strict(),
+  style: z.object(payloadFieldSchemas.style).strict(),
+  skeleton: z.object(payloadFieldSchemas.skeleton).strict(),
 };
 
 // 溯源对象的基础 schema：book/chapter 缺省为空串，随对象整体参与校验
@@ -71,9 +77,15 @@ const sourcePatchSchema = withSourceChecks(sourceObject);
 const tagSchema = z.string().trim().min(1, '标签不能为空').max(50, '标签过长');
 const tagsSchema = z.array(tagSchema).max(20, '标签最多 20 个');
 
-const materialFields = {
+/** 标题/正文的共享校验规则（书内覆写复用） */
+export const materialFieldSchemas = {
   title: z.string().trim().min(1, '标题不能为空').max(200, '标题过长'),
   content: z.string().trim().min(1, '正文不能为空').max(50_000, '正文过长'),
+};
+
+const materialFields = {
+  title: materialFieldSchemas.title,
+  content: materialFieldSchemas.content,
   tags: tagsSchema.default([]),
   source: sourceSchema,
 };
@@ -180,7 +192,8 @@ function parseType(body: unknown): MaterialType {
   return raw as MaterialType;
 }
 
-function toMaterialJson(record: MaterialRecord) {
+/** 素材 JSON 视图（书内引用的 material 字段复用同一形状） */
+export function toMaterialJson(record: MaterialRecord) {
   return {
     id: record.id,
     type: record.type,
