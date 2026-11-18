@@ -210,15 +210,18 @@ export async function seedReference(
   return res.body;
 }
 
-/** 给 extract 任务配置可解析的路由（供应商 + 启用） */
-export async function configureExtractRoute(request: TestEnv['request']): Promise<void> {
-  const provider = await seedProvider(request, { name: '抽取供应商' });
-  const res = await request.put('/api/settings/routes/extract', {
+/** 给指定任务配置可解析的路由（供应商 + 启用） */
+export async function configureRoute(
+  request: TestEnv['request'],
+  task: import('../src/llm/types').TaskType
+): Promise<void> {
+  const provider = await seedProvider(request, { name: `供应商·${task}` });
+  const res = await request.put(`/api/settings/routes/${task}`, {
     providerId: provider.id,
-    model: 'extract-model',
+    model: `${task}-model`,
     enabled: true,
   });
-  if (res.status !== 200) throw new Error(`配置 extract 路由失败：${res.status} ${JSON.stringify(res.body)}`);
+  if (res.status !== 200) throw new Error(`配置 ${task} 路由失败：${res.status} ${JSON.stringify(res.body)}`);
 }
 
 import type { ChatResult } from '../src/llm/types';

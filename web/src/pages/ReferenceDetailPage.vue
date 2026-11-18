@@ -18,6 +18,8 @@ const actionError = ref<string | null>(null);
 
 const extracting = ref(false);
 const extractMessage = ref<string | null>(null);
+/** 全书骨骼提取 / 一键仿写共用的忙状态（两者都产出入队条目） */
+const skeletonBusy = ref(false);
 
 const progressPercent = computed(() =>
   reference.value && reference.value.chapterCount > 0
@@ -96,6 +98,41 @@ async function reloadQueue() {
   }
 }
 
+/** 全书骨骼提取：全书章节标题 + 开头片段 → 结构完整的骨骼条目进确认队列 */
+async function extractSkeleton() {
+  skeletonBusy.value = true;
+  extractMessage.value = null;
+  actionError.value = null;
+  try {
+    await api.post(`/api/references/${referenceId.value}/extract-skeleton`, {});
+    extractMessage.value = '全书骨骼已提取，请在确认队列中处理。';
+    await loadQueue();
+  } catch (cause) {
+    actionError.value = errorMessage(cause);
+  } finally {
+    skeletonBusy.value = false;
+  }
+}
+
+/** 一键仿写：基于已入库书骨骼生成全新设定/角色卡（走确认队列入库） */
+async function adaptSkeleton(item: ExtractionItem) {
+  if (item.materialId === null) return;
+  skeletonBusy.value = true;
+  extractMessage.value = null;
+  actionError.value = null;
+  try {
+    const res = await api.post<{ created: number }>(`/api/references/${referenceId.value}/adapt-skeleton`, {
+      materialId: item.materialId,
+    });
+    extractMessage.value = `仿写完成：已生成 ${res.created} 条原创设定/角色，请在确认队列中逐条处理。`;
+    await loadQueue();
+  } catch (cause) {
+    actionError.value = errorMessage(cause);
+  } finally {
+    skeletonBusy.value = false;
+  }
+}
+
 watch(referenceId, load);
 onMounted(load);
 </script>
@@ -140,12 +177,23 @@ onMounted(load);
       <section class="panel">
         <div class="panel-head">
           <h2>确认队列（{{ pendingItems.length }}）</h2>
-          <label class="checkbox-label">
-            <input v-model="showArchived" type="checkbox" /> 显示已处理（{{ archivedItems.length }}）
-          </label>
+          <div class="material-actions">
+            <button
+              class="btn"
+              type="button"
+              :disabled="skeletonBusy"
+              
+              @click="extractSkeleton"
+            >
+              {{ skeletonBusy ? '提取中……' : '提取全书骨骼' }}
+            </button>
+            <label class="checkbox-label">
+              <input v-model="showArchived" type="checkbox" /> 显示已处理（{{ archivedItems.length }}）
+            </label>
+          </div>
         </div>
         <div v-if="pendingItems.length === 0 && !showArchived" class="empty muted">
-          队列为空。点击「开始逐章抽取」，AI 抽出的素材会进入这里等待确认。
+          队列为空。点击「开始逐章抽取」抽取素材，或「提取全书骨骼」提炼整本书的结构骨架。
         </div>
         <div class="material-list">
           <ExtractionCard
@@ -156,7 +204,13 @@ onMounted(load);
             @removed="reloadQueue"
           />
           <template v-if="showArchived">
-            <ExtractionCard v-for="item in archivedItems" :key="`a-${item.id}`" :item="item" @changed="reloadQueue" />
+            <ExtractionCard
+              v-for="item in archivedItems"
+              :key="`a-${item.id}`"
+              :item="item"
+              @changed="reloadQueue"
+              @adapt="adaptSkeleton(item)"
+            />
           </template>
         </div>
       </section>

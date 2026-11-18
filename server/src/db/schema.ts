@@ -141,4 +141,34 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_extraction_items_ref_status ON extraction_items(reference_id, status);
   `,
+
+  // v5：书骨骼提取与仿写（T5）——重建 extraction_items：chapter_id 改可空（全书级骨骼/仿写条目
+  // 不挂具体章），新增 source_skeleton_id 记录仿写来源骨骼（仿写素材确认入库后溯源 chapter 指向它）
+  `
+  CREATE TABLE extraction_items_v5 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference_id INTEGER NOT NULL REFERENCES reference_books(id) ON DELETE CASCADE,
+    chapter_id INTEGER REFERENCES reference_chapters(id) ON DELETE CASCADE,
+    source_skeleton_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+    type TEXT NOT NULL CHECK (type IN ('setting', 'trope', 'style', 'skeleton')),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    resolution TEXT CHECK (resolution IN ('new', 'merge', 'skip')),
+    material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  INSERT INTO extraction_items_v5
+    (id, reference_id, chapter_id, source_skeleton_id, type, title, content, payload, status, resolution, material_id, created_at, updated_at)
+  SELECT id, reference_id, chapter_id, NULL, type, title, content, payload, status, resolution, material_id, created_at, updated_at
+  FROM extraction_items;
+
+  DROP TABLE extraction_items;
+  ALTER TABLE extraction_items_v5 RENAME TO extraction_items;
+
+  CREATE INDEX idx_extraction_items_ref_status ON extraction_items(reference_id, status);
+  `,
 ];

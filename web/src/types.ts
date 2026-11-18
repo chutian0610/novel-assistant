@@ -153,8 +153,11 @@ export interface ExtractionConflict {
 export interface ExtractionItem {
   id: number;
   referenceId: number;
-  chapterId: number;
+  /** 所属章节；null 表示全书级条目（全书骨骼提取 / 骨骼仿写产出），chapterTitle 为「全书」 */
+  chapterId: number | null;
   chapterTitle: string;
+  /** 仿写条目的源书骨骼素材 */
+  sourceSkeleton: { materialId: number; title: string } | null;
   type: MaterialType;
   title: string;
   content: string;
