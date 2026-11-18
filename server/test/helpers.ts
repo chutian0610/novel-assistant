@@ -28,6 +28,8 @@ export interface TestEnv {
     patch(url: string, body?: unknown): request.Test;
     put(url: string, body?: unknown): request.Test;
     delete(url: string): request.Test;
+    /** 发送原始请求体（非 JSON），用于上传接口 */
+    postRaw(url: string, body: string | Buffer, contentType: string): request.Test;
   };
 }
 
@@ -56,6 +58,7 @@ export function createTestApp(llm: LLMProvider = new FakeLLM()): TestEnv {
       patch: withBody('patch'),
       put: withBody('put'),
       delete: (url) => agent.delete(url),
+      postRaw: (url, body, contentType) => agent.post(url).set('content-type', contentType).send(body),
     },
   };
 }
@@ -178,5 +181,63 @@ export async function seedBookMaterial(
 ): Promise<TestBookMaterialItem> {
   const res = await request.post(`/api/books/${bookId}/materials`, { materialId });
   if (res.status !== 201) throw new Error(`预置书内引用失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+// ---- 拆书提取（T4）----
+
+/** 参考书 JSON 形状与 server 的 ReferenceDetail 同构 */
+export type TestReference = import('../src/references/store').ReferenceDetail;
+
+export interface TestChapterInput {
+  title: string;
+  content: string;
+}
+
+/** 通过 API 上传一本 txt 参考书（章标题行 + 正文的纯文本拼接） */
+export async function seedReference(
+  request: TestEnv['request'],
+  chapters: TestChapterInput[],
+  title = '参考书·拆书测试'
+): Promise<TestReference> {
+  const text = chapters.map((c) => `${c.title}\n${c.content}`).join('\n\n');
+  const res = await request.postRaw(
+    `/api/references?format=txt&title=${encodeURIComponent(title)}`,
+    text,
+    'text/plain; charset=utf-8'
+  );
+  if (res.status !== 201) throw new Error(`预置参考书失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 给 extract 任务配置可解析的路由（供应商 + 启用） */
+export async function configureExtractRoute(request: TestEnv['request']): Promise<void> {
+  const provider = await seedProvider(request, { name: '抽取供应商' });
+  const res = await request.put('/api/settings/routes/extract', {
+    providerId: provider.id,
+    model: 'extract-model',
+    enabled: true,
+  });
+  if (res.status !== 200) throw new Error(`配置 extract 路由失败：${res.status} ${JSON.stringify(res.body)}`);
+}
+
+import type { ChatResult } from '../src/llm/types';
+
+/** 把抽取条目包装成 FakeLLM 的脚本化响应 */
+export function extractResult(items: unknown): ChatResult {
+  return { content: JSON.stringify({ materials: items }), model: 'fake-extract' };
+}
+
+/** 抽取条目 JSON 形状与 server 的 ExtractionItemRecord 同构 */
+export type TestExtractionItem = import('../src/references/store').ExtractionItemRecord;
+
+/** 获取某本参考书的抽取确认队列（可按状态过滤） */
+export async function extractQueue(
+  request: TestEnv['request'],
+  referenceId: number,
+  status?: 'pending' | 'accepted' | 'rejected'
+): Promise<{ items: TestExtractionItem[]; total: number }> {
+  const res = await request.get(`/api/references/${referenceId}/extractions${status ? `?status=${status}` : ''}`);
+  if (res.status !== 200) throw new Error(`获取抽取队列失败：${res.status} ${JSON.stringify(res.body)}`);
   return res.body;
 }

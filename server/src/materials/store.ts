@@ -5,8 +5,34 @@ import { buildSearchText, buildMatchQuery } from './search';
 export const MATERIAL_TYPES = ['setting', 'trope', 'style', 'skeleton'] as const;
 export type MaterialType = (typeof MATERIAL_TYPES)[number];
 
+/** 各类型结构化字段的领域规则（zod schema 在 API 层据此构建；前端 web/src/materialSchema.ts 为镜像表单定义） */
+export interface PayloadFieldRule {
+  key: string;
+  label: string;
+  required: boolean;
+  maxLength: number;
+}
+
+export const PAYLOAD_FIELDS: Record<MaterialType, PayloadFieldRule[]> = {
+  setting: [{ key: 'category', label: '领域分类', required: false, maxLength: 100 }],
+  trope: [{ key: 'structure', label: '结构要点', required: false, maxLength: 5000 }],
+  style: [{ key: 'rhythm', label: '句式节奏说明', required: false, maxLength: 5000 }],
+  skeleton: [
+    { key: 'pacingCurve', label: '节奏曲线', required: true, maxLength: 10000 },
+    { key: 'volumeStructure', label: '卷纲结构', required: true, maxLength: 10000 },
+    { key: 'archetypes', label: '人物原型', required: true, maxLength: 10000 },
+  ],
+};
+
 /** 各类型的结构化字段（schema 在 API 层按类型校验；前端 web/src/materialSchema.ts 为镜像表单定义） */
 export type MaterialPayload = Record<string, string>;
+
+/** 素材字段的按键补丁（书内覆写与抽取条目修改共用形状） */
+export interface MaterialFieldPatch {
+  title?: string;
+  content?: string;
+  payload?: MaterialPayload;
+}
 
 export interface MaterialSource {
   kind: 'manual' | 'reference';

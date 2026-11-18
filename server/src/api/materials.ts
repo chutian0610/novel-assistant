@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { DB } from '../db/open';
 import {
   MATERIAL_TYPES,
+  PAYLOAD_FIELDS,
   createMaterial,
   deleteMaterial,
   getMaterial,
@@ -13,28 +14,26 @@ import {
   type MaterialPayload,
   type MaterialRecord,
   type MaterialType,
+  type PayloadFieldRule,
 } from '../materials/store';
 import { HttpError } from './errors';
 import { parseBody, parseId, parsePaginationInt, readJson } from './validate';
 
+/** 领域字段规则 → 单字段 zod 校验（required 即非空，错误消息取字段标签） */
+function fieldSchema(rule: PayloadFieldRule): z.ZodString {
+  const base = z.string().trim().max(rule.maxLength);
+  return rule.required ? base.min(1, `${rule.label}不能为空`) : base;
+}
+
 /**
- * 各类型素材的结构化字段 schema（与 web/src/materialSchema.ts 的表单定义保持镜像同步）。
- * payload 用 .strict()：未知字段直接拒绝，保证各类型 schema 边界清晰。
+ * 各类型 payload 的合法键与单字段校验（由 materials/store.ts 的 PAYLOAD_FIELDS 领域规则构建，
+ * 书内覆写 / 抽取条目修改按键部分校验复用同一份定义）。
  */
-/** 各类型 payload 的合法键与单字段校验；书内覆写（api/books.ts）按键部分校验复用同一份定义 */
 export const payloadFieldSchemas: Record<MaterialType, Record<string, z.ZodString>> = {
-  // 设定卡：领域分类（世界观/人物/物品/势力/地点等，自由文本便于扩展）
-  setting: { category: z.string().trim().max(100) },
-  // 桥段：冲突模式、名场面结构、钩子/反转如何展开
-  trope: { structure: z.string().trim().max(5000) },
-  // 文风样本：句式节奏说明
-  style: { rhythm: z.string().trim().max(5000) },
-  // 书骨骼：节奏曲线 / 卷纲结构 / 人物原型（验收必备三字段）
-  skeleton: {
-    pacingCurve: z.string().trim().min(1, '节奏曲线不能为空').max(10000),
-    volumeStructure: z.string().trim().min(1, '卷纲结构不能为空').max(10000),
-    archetypes: z.string().trim().min(1, '人物原型不能为空').max(10000),
-  },
+  setting: { category: fieldSchema(PAYLOAD_FIELDS.setting[0]!) },
+  trope: { structure: fieldSchema(PAYLOAD_FIELDS.trope[0]!) },
+  style: { rhythm: fieldSchema(PAYLOAD_FIELDS.style[0]!) },
+  skeleton: Object.fromEntries(PAYLOAD_FIELDS.skeleton.map((rule) => [rule.key, fieldSchema(rule)])),
 };
 
 const payloadSchemas: Record<MaterialType, z.ZodType> = {

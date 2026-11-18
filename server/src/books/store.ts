@@ -1,5 +1,5 @@
 import type { DB } from '../db/open';
-import { getMaterial, type MaterialPayload, type MaterialRecord } from '../materials/store';
+import { getMaterial, type MaterialFieldPatch, type MaterialPayload, type MaterialRecord } from '../materials/store';
 
 export interface BookRecord {
   id: number;
@@ -20,12 +20,8 @@ export interface BookWriteInput {
   promise: string;
 }
 
-/** 书内覆写补丁：按键遮蔽全局素材的同名字段，不回写全局库 */
-export interface MaterialOverrides {
-  title?: string;
-  content?: string;
-  payload?: MaterialPayload;
-}
+/** 书内覆写补丁：按键遮蔽全局素材的同名字段，不回写全局库（形状同共享的素材字段补丁） */
+export type MaterialOverrides = MaterialFieldPatch;
 
 export interface BookMaterialRecord {
   materialId: number;

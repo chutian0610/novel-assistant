@@ -2,7 +2,7 @@
 import { RouterLink } from 'vue-router';
 
 // 占位导航：其余页面由后续工单逐个接入
-const plannedItems = ['拆书', '写作台', '事实面板', '检测报告'];
+const plannedItems = ['写作台', '事实面板', '检测报告'];
 </script>
 
 <template>
@@ -14,6 +14,7 @@ const plannedItems = ['拆书', '写作台', '事实面板', '检测报告'];
       </div>
       <nav class="nav">
         <RouterLink to="/books" class="nav-item" active-class="active">书架</RouterLink>
+        <RouterLink to="/references" class="nav-item" active-class="active">拆书</RouterLink>
         <RouterLink to="/materials" class="nav-item" active-class="active">素材库</RouterLink>
         <RouterLink to="/settings" class="nav-item" active-class="active">设置</RouterLink>
         <span v-for="label in plannedItems" :key="label" class="nav-item disabled" title="后续版本提供">
