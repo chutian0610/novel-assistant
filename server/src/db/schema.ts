@@ -100,4 +100,45 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_book_materials_material ON book_materials(material_id);
   `,
+
+  // v4：拆书提取（T4）——参考书 + 章节（分章落盘，抽取按章断点续跑）+ 抽取确认队列。
+  // 确认入库才写入 materials（带参考书溯源）；删除参考书级联清理章与队列，已入库素材不受影响
+  `
+  CREATE TABLE reference_books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    format TEXT NOT NULL CHECK (format IN ('txt', 'epub')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE TABLE reference_chapters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference_id INTEGER NOT NULL REFERENCES reference_books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    extract_status TEXT NOT NULL DEFAULT 'pending' CHECK (extract_status IN ('pending', 'done')),
+    UNIQUE (reference_id, idx)
+  );
+
+  CREATE INDEX idx_reference_chapters_ref ON reference_chapters(reference_id);
+
+  CREATE TABLE extraction_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    reference_id INTEGER NOT NULL REFERENCES reference_books(id) ON DELETE CASCADE,
+    chapter_id INTEGER NOT NULL REFERENCES reference_chapters(id) ON DELETE CASCADE,
+    type TEXT NOT NULL CHECK (type IN ('setting', 'trope', 'style', 'skeleton')),
+    title TEXT NOT NULL,
+    content TEXT NOT NULL,
+    payload TEXT NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'accepted', 'rejected')),
+    resolution TEXT CHECK (resolution IN ('new', 'merge', 'skip')),
+    material_id INTEGER REFERENCES materials(id) ON DELETE SET NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_extraction_items_ref_status ON extraction_items(reference_id, status);
+  `,
 ];

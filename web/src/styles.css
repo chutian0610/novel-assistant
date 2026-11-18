@@ -647,3 +647,64 @@ h3 {
   color: var(--warn-text);
   background: var(--warn-bg);
 }
+
+/* ---- 拆书 ---- */
+.upload-file {
+  max-width: 280px;
+}
+.accent-chip {
+  background: #eef3fe;
+  color: var(--accent);
+}
+.progress-track {
+  height: 8px;
+  border-radius: 999px;
+  background: #eef0f3;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 999px;
+  transition: width 0.3s ease;
+}
+.chapter-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.chapter-chip {
+  font-size: 12px;
+  padding: 1px 10px;
+  border-radius: 999px;
+  background: #f0f1f3;
+  color: var(--muted);
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.chapter-chip.chapter-done {
+  background: #e6f4ea;
+  color: var(--ok);
+}
+.conflict-banner {
+  font-size: 13px;
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-radius: 6px;
+  padding: 6px 12px;
+  margin: 8px 0;
+}
+.accept-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 10px;
+}
+.archived-card {
+  opacity: 0.72;
+}

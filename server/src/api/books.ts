@@ -16,9 +16,9 @@ import {
   type MaterialOverrides,
 } from '../books/store';
 import type { DB } from '../db/open';
-import { getMaterial, type MaterialType } from '../materials/store';
+import { getMaterial } from '../materials/store';
 import { HttpError } from './errors';
-import { materialFieldSchemas, payloadFieldSchemas } from './materials';
+import { parseMaterialFieldPatch } from './material-patch';
 import { parseBody, parseId, parsePaginationInt, readJson } from './validate';
 
 /** 书契约元数据的基础规则；创建时包 default('')，PATCH 时包 optional（不带默认值防泄漏） */
@@ -47,44 +47,6 @@ const bookPatchSchema = z
   })
   .strict()
   .refine((patch) => Object.keys(patch).length > 0, '至少提供一个要更新的字段');
-
-/**
- * 覆写补丁校验：title/content 复用全局规则；payload 按素材类型的合法键逐键部分校验
- * （覆写是按键补丁，不要求该类型全部字段齐备，合并结果天然合法）。空补丁 = 清除全部覆写。
- */
-function parseOverridesPatch(type: MaterialType, body: unknown): MaterialOverrides {
-  if (body === null || typeof body !== 'object' || Array.isArray(body)) {
-    throw new HttpError(400, '参数 overrides：应为对象（空对象表示清除全部覆写）');
-  }
-  const data = parseBody(
-    z
-      .object({
-        title: materialFieldSchemas.title.optional(),
-        content: materialFieldSchemas.content.optional(),
-        payload: z.record(z.string(), z.string()).optional(),
-      })
-      .strict(),
-    body
-  );
-  const overrides: MaterialOverrides = {};
-  if (data.title !== undefined) overrides.title = data.title;
-  if (data.content !== undefined) overrides.content = data.content;
-  if (data.payload !== undefined) {
-    const fields = payloadFieldSchemas[type];
-    const payload: Record<string, string> = {};
-    for (const [key, value] of Object.entries(data.payload)) {
-      const fieldSchema = fields[key];
-      if (!fieldSchema) throw new HttpError(400, `参数 payload.${key}：${type} 类素材没有字段 ${key}`);
-      const check = fieldSchema.safeParse(value);
-      if (!check.success) {
-        throw new HttpError(400, `参数 payload.${key}：${check.error.issues[0]?.message ?? '不合法'}`);
-      }
-      payload[key] = check.data;
-    }
-    overrides.payload = payload;
-  }
-  return overrides;
-}
 
 /** 路由通用的取书 + 404 前导 */
 function requireBook(db: DB, id: number, rawId: string): BookRecord {
@@ -163,7 +125,7 @@ export function booksRoutes(deps: { db: DB }) {
     if (overrides === undefined) {
       throw new HttpError(400, '参数 overrides：缺失（空对象表示清除全部覆写）');
     }
-    return c.json(updateBookMaterial(db, bookId, materialId, parseOverridesPatch(material.type, overrides)));
+    return c.json(updateBookMaterial(db, bookId, materialId, parseMaterialFieldPatch(material.type, overrides, 'overrides')));
   });
 
   app.delete('/books/:id/materials/:materialId', (c) => {

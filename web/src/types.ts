@@ -111,3 +111,69 @@ export interface BookMaterialListResponse {
   items: BookMaterialItem[];
   total: number;
 }
+
+// ---- 拆书提取（与 server/src/references/store.ts 为镜像副本，增删字段须两处同步） ----
+
+export type ReferenceFormat = 'txt' | 'epub';
+
+export interface ReferenceChapter {
+  id: number;
+  idx: number;
+  title: string;
+  content: string;
+  charCount: number;
+  extractStatus: 'pending' | 'done';
+}
+
+export interface ReferenceBook {
+  id: number;
+  title: string;
+  format: ReferenceFormat;
+  chapterCount: number;
+  extractedCount: number;
+  pendingItemCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ReferenceDetail extends ReferenceBook {
+  chapters: ReferenceChapter[];
+}
+
+export interface ReferenceListResponse {
+  items: ReferenceBook[];
+  total: number;
+}
+
+export interface ExtractionConflict {
+  materialId: number;
+  title: string;
+}
+
+export interface ExtractionItem {
+  id: number;
+  referenceId: number;
+  chapterId: number;
+  chapterTitle: string;
+  type: MaterialType;
+  title: string;
+  content: string;
+  payload: Record<string, string>;
+  status: 'pending' | 'accepted' | 'rejected';
+  resolution: 'new' | 'merge' | 'skip' | null;
+  materialId: number | null;
+  conflict: ExtractionConflict | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ExtractionListResponse {
+  items: ExtractionItem[];
+  total: number;
+}
+
+export interface ExtractRunResult {
+  processed: { chapterId: number; chapterTitle: string; itemCount: number }[];
+  failed: { chapterId: number; chapterTitle: string; error: string }[];
+  remaining: number;
+}
