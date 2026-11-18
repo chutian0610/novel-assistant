@@ -5,7 +5,7 @@ import { MATERIAL_FIELDS } from '../materialSchema';
 import { MATERIAL_TYPE_LABELS, type ExtractionItem } from '../types';
 
 const props = defineProps<{ item: ExtractionItem }>();
-const emit = defineEmits<{ changed: []; removed: [] }>();
+const emit = defineEmits<{ changed: []; removed: []; adapt: [] }>();
 
 const form = reactive({
   title: props.item.title,
@@ -18,6 +18,10 @@ const error = ref<string | null>(null);
 
 const fieldDefs = MATERIAL_FIELDS[props.item.type];
 const isArchived = computed(() => props.item.status !== 'pending');
+/** 已入库的书骨骼可一键仿写（仿写来源条目本身除外） */
+const canAdapt = computed(
+  () => isArchived.value && props.item.status === 'accepted' && props.item.type === 'skeleton' && props.item.materialId !== null && props.item.sourceSkeleton === null
+);
 
 function diffPatch(): { title?: string; content?: string; payload?: Record<string, string> } {
   const patch: { title?: string; content?: string; payload?: Record<string, string> } = {};
@@ -85,6 +89,7 @@ async function reject() {
     <div class="material-head">
       <span class="badge badge-type">{{ MATERIAL_TYPE_LABELS[item.type] }}</span>
       <span class="muted small">{{ item.chapterTitle }}</span>
+      <span v-if="item.sourceSkeleton" class="chip chip-static accent-chip">仿写自《{{ item.sourceSkeleton.title }}》</span>
       <div class="material-actions" v-if="!isArchived">
         <button class="btn btn-ghost" type="button" :disabled="busy" @click="saveEdits">保存修改</button>
         <button class="btn btn-danger-ghost" type="button" :disabled="busy" @click="reject">拒绝</button>
@@ -128,6 +133,10 @@ async function reject() {
         <button class="btn" type="button" :disabled="busy" @click="accept('merge')">合并入已有</button>
         <button class="btn" type="button" :disabled="busy" @click="accept('skip')">跳过不入库</button>
       </template>
+    </div>
+    <div v-if="canAdapt" class="accept-row">
+      <button class="btn btn-primary" type="button" @click="emit('adapt')">一键仿写：生成全新设定与角色</button>
+      <span class="muted small">基于该骨骼的结构方法论产出原创设定卡，走确认队列入库。</span>
     </div>
   </article>
 </template>

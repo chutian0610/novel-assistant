@@ -33,8 +33,11 @@ export interface ReferenceDetail extends ReferenceRecord {
 export interface ExtractionItemRecord {
   id: number;
   referenceId: number;
-  chapterId: number;
+  /** 所属章节；null 表示全书级条目（全书骨骼提取 / 骨骼仿写产出），chapterTitle 显示为「全书」 */
+  chapterId: number | null;
   chapterTitle: string;
+  /** 仿写条目的源书骨骼素材（确认入库后溯源 chapter 指向它） */
+  sourceSkeleton: { materialId: number; title: string } | null;
   type: MaterialType;
   title: string;
   content: string;
@@ -49,11 +52,14 @@ export interface ExtractionItemRecord {
 }
 
 export interface ExtractedItemInput {
-  chapterId: number;
+  /** null = 全书级条目（全书骨骼提取 / 骨骼仿写产出） */
+  chapterId: number | null;
   type: MaterialType;
   title: string;
   content: string;
   payload: MaterialPayload;
+  /** 仿写来源骨骼素材 id；非仿写条目为 null */
+  sourceSkeletonId: number | null;
 }
 
 interface ReferenceRow {
@@ -78,8 +84,10 @@ interface ChapterRow {
 interface ExtractionRow {
   id: number;
   reference_id: number;
-  chapter_id: number;
-  chapter_title: string;
+  chapter_id: number | null;
+  chapter_title: string | null;
+  source_skeleton_id: number | null;
+  source_skeleton_title: string | null;
   type: string;
   title: string;
   content: string;
@@ -187,31 +195,51 @@ export function markChapterDone(db: DB, chapterId: number): void {
 // ---------- 抽取确认队列 ----------
 
 const EXTRACTION_SELECT = `
-  SELECT e.*, ch.title AS chapter_title
+  SELECT e.*, ch.title AS chapter_title, src.id AS source_skeleton_id, src.title AS source_skeleton_title
   FROM extraction_items e
-  JOIN reference_chapters ch ON ch.id = e.chapter_id`;
+  LEFT JOIN reference_chapters ch ON ch.id = e.chapter_id
+  LEFT JOIN materials src ON src.id = e.source_skeleton_id`;
 
-export function insertExtractionItems(db: DB, items: ExtractedItemInput[]): void {
+export function insertExtractionItems(db: DB, referenceId: number, items: ExtractedItemInput[]): number[] {
   const insert = db.prepare(
-    'INSERT INTO extraction_items (reference_id, chapter_id, type, title, content, payload) VALUES (?, ?, ?, ?, ?, ?)'
+    'INSERT INTO extraction_items (reference_id, chapter_id, source_skeleton_id, type, title, content, payload) VALUES (?, ?, ?, ?, ?, ?, ?)'
   );
+  const ids: number[] = [];
   const run = db.transaction(() => {
     for (const item of items) {
-      const { reference_id: referenceId } = db
-        .prepare('SELECT reference_id FROM reference_chapters WHERE id = ?')
-        .get(item.chapterId) as { reference_id: number };
-      insert.run(referenceId, item.chapterId, item.type, item.title, item.content, JSON.stringify(item.payload));
+      const info = insert.run(
+        referenceId,
+        item.chapterId,
+        item.sourceSkeletonId,
+        item.type,
+        item.title,
+        item.content,
+        JSON.stringify(item.payload)
+      );
+      ids.push(Number(info.lastInsertRowid));
     }
   });
   run();
+  return ids;
 }
 
 export function listExtractionItems(db: DB, referenceId: number, status?: ExtractionStatus): { items: ExtractionItemRecord[]; total: number } {
-  const clause = status ? `${EXTRACTION_SELECT} WHERE e.reference_id = ? AND e.status = ?` : `${EXTRACTION_SELECT} WHERE e.reference_id = ?`;
   const rows = (
-    status ? db.prepare(`${clause} ORDER BY ch.idx ASC, e.id ASC`).all(referenceId, status) : db.prepare(`${clause} ORDER BY ch.idx ASC, e.id ASC`).all(referenceId)
+    status
+      ? db.prepare(`${EXTRACTION_SELECT} WHERE e.reference_id = ? AND e.status = ? ORDER BY e.id ASC`).all(referenceId, status)
+      : db.prepare(`${EXTRACTION_SELECT} WHERE e.reference_id = ? ORDER BY e.id ASC`).all(referenceId)
   ) as ExtractionRow[];
   return { items: rows.map((row) => toExtractionRecord(db, row)), total: rows.length };
+}
+
+/** 该书是否已有待确认的全书级骨骼条目（避免重复触发全书提取） */
+export function hasPendingBookSkeleton(db: DB, referenceId: number): boolean {
+  const row = db
+    .prepare(
+      "SELECT id FROM extraction_items WHERE reference_id = ? AND chapter_id IS NULL AND type = 'skeleton' AND status = 'pending' LIMIT 1"
+    )
+    .get(referenceId);
+  return row !== undefined;
 }
 
 export function getExtractionItem(db: DB, id: number): ExtractionItemRecord | null {
@@ -293,7 +321,11 @@ function toExtractionRecord(db: DB, row: ExtractionRow): ExtractionItemRecord {
     id: row.id,
     referenceId: row.reference_id,
     chapterId: row.chapter_id,
-    chapterTitle: row.chapter_title,
+    chapterTitle: row.chapter_title ?? '全书',
+    sourceSkeleton:
+      row.source_skeleton_id !== null && row.source_skeleton_title !== null
+        ? { materialId: row.source_skeleton_id, title: row.source_skeleton_title }
+        : null,
     type: row.type as MaterialType,
     title: row.title,
     content: row.content,

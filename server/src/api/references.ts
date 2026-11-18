@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { runExtraction } from '../references/extract';
+import { adaptBookSkeleton, extractBookSkeleton, ExtractionParseError, runExtraction, type BookSkeletonDraft } from '../references/extract';
 import { decodeReferenceText, parseEpub, splitTxtChapters } from '../references/split';
 import {
   archiveExtractionItem,
@@ -9,6 +9,8 @@ import {
   getExtractionItem,
   getReference,
   getReferenceTitle,
+  hasPendingBookSkeleton,
+  insertExtractionItems,
   listExtractionItems,
   listReferences,
   updateExtractionItem,
@@ -16,6 +18,7 @@ import {
   type ExtractionStatus,
 } from '../references/store';
 import { createMaterial, getMaterial, updateMaterial, type MaterialSource } from '../materials/store';
+import { resolveRoute } from '../llm/resolver';
 import { RouteNotConfiguredError } from '../llm/routed';
 import type { DB } from '../db/open';
 import type { LLMProvider } from '../llm/types';
@@ -26,6 +29,13 @@ import { parseBody, parseId, readJson } from './validate';
 const MAX_TXT_BYTES = 5 * 1024 * 1024;
 const MAX_EPUB_BYTES = 50 * 1024 * 1024;
 const EXTRACTION_STATUSES = ['pending', 'accepted', 'rejected'] as const;
+
+/** 抽取/仿写服务错误 → HTTP 的统一映射：路由未配置 → 409，LLM 产出解析失败 → 502 */
+function mapExtractionError(cause: unknown): unknown {
+  if (cause instanceof RouteNotConfiguredError) return new HttpError(409, cause.message);
+  if (cause instanceof ExtractionParseError) return new HttpError(502, cause.message);
+  return cause;
+}
 
 /** 第四组路由：拆书提取（上传/分章 → 逐章抽取 → 确认队列 → 入库），LLM 走 extract 任务路由 */
 export function referencesRoutes(deps: { db: DB; llm: LLMProvider }) {
@@ -95,8 +105,59 @@ export function referencesRoutes(deps: { db: DB; llm: LLMProvider }) {
     try {
       return c.json(await runExtraction(db, llm, referenceId, { chapterIds, limit }));
     } catch (cause) {
-      if (cause instanceof RouteNotConfiguredError) throw new HttpError(409, cause.message);
-      throw cause;
+      throw mapExtractionError(cause);
+    }
+  });
+
+  // ---------- 全书骨骼提取与一键仿写（T5） ----------
+
+  /** 全书骨骼提取：全书章节标题 + 开头片段 → 结构完整的 skeleton 条目进确认队列（不挂具体章） */
+  app.post('/references/:id/extract-skeleton', async (c) => {
+    const referenceId = parseId(c.req.param('id'));
+    const reference = getReference(db, referenceId);
+    if (!reference) throw new HttpError(404, `参考书 ${c.req.param('id')} 不存在`);
+    try {
+      if (!resolveRoute(db, 'extract')) throw new RouteNotConfiguredError('extract');
+      if (hasPendingBookSkeleton(db, referenceId)) {
+        throw new HttpError(409, '已有待确认的全书骨骼条目，请先处理后再重新提取');
+      }
+      const skeleton = await extractBookSkeleton(llm, reference.chapters);
+      const ids = insertExtractionItems(db, referenceId, [{ ...skeleton, type: 'skeleton' as const, chapterId: null, sourceSkeletonId: null }]);
+      return c.json(getExtractionItem(db, ids[0]!), 201);
+    } catch (cause) {
+      throw mapExtractionError(cause);
+    }
+  });
+
+  /** 一键仿写：对已入库的书骨骼生成全新原创设定/角色卡，产出条目带源骨骼溯源进确认队列 */
+  app.post('/references/:id/adapt-skeleton', async (c) => {
+    const referenceId = parseId(c.req.param('id'));
+    if (!getReference(db, referenceId)) throw new HttpError(404, `参考书 ${c.req.param('id')} 不存在`);
+    try {
+      const { materialId } = parseBody(
+        z.object({ materialId: z.number().int().positive() }).strict(),
+        await readJson(c)
+      );
+      const skeleton = getMaterial(db, materialId);
+      if (!skeleton) throw new HttpError(404, `素材 ${materialId} 不存在`);
+      if (skeleton.type !== 'skeleton') throw new HttpError(400, `素材 ${materialId} 不是书骨骼，无法仿写`);
+      if (!resolveRoute(db, 'outline')) throw new RouteNotConfiguredError('outline');
+
+      const draft: BookSkeletonDraft = {
+        type: 'skeleton',
+        title: skeleton.title,
+        content: skeleton.content,
+        payload: skeleton.payload,
+      };
+      const items = await adaptBookSkeleton(llm, draft);
+      insertExtractionItems(
+        db,
+        referenceId,
+        items.map((item) => ({ ...item, chapterId: null, sourceSkeletonId: skeleton.id }))
+      );
+      return c.json({ created: items.length }, 201);
+    } catch (cause) {
+      throw mapExtractionError(cause);
     }
   });
 
@@ -164,7 +225,9 @@ export function referencesRoutes(deps: { db: DB; llm: LLMProvider }) {
 
     let materialId: number | null = null;
     if (resolution !== 'skip') {
-      const source: MaterialSource = { kind: 'reference', book: getReferenceTitle(db, item.referenceId) ?? '', chapter: item.chapterTitle };
+      // 溯源章名：仿写条目指向源书骨骼；普通条目指向所属章（全书级条目为「全书」）
+      const chapterLabel = item.sourceSkeleton ? `仿写自《${item.sourceSkeleton.title}》` : item.chapterTitle;
+      const source: MaterialSource = { kind: 'reference', book: getReferenceTitle(db, item.referenceId) ?? '', chapter: chapterLabel };
       if (resolution === 'merge') {
         if (!conflict) throw new HttpError(400, '没有可合并的重名素材');
         const existing = getMaterial(db, conflict.materialId)!;

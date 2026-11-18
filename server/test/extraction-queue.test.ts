@@ -1,6 +1,6 @@
 import { expect, it } from 'vitest';
 import { LLMError } from '../src/llm/types';
-import { configureExtractRoute, createTestApp, extractResult, extractQueue, seedMaterial, seedReference, type TestExtractionItem } from './helpers';
+import { configureRoute, createTestApp, extractResult, extractQueue, seedMaterial, seedReference, type TestExtractionItem } from './helpers';
 
 const CHAPTER_1_ITEMS = [
   { type: 'setting', title: '玄天宗', content: '北境头号宗门，掌门陆沉舟。', payload: { category: '势力' } },
@@ -18,7 +18,7 @@ it('未配置 extract 路由时抽取返回 409', async () => {
 
 it('FakeLLM 脚本化响应抽取单章：条目入队、章节标记完成、溯源上下文进入 prompt', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [
     { title: '第一章 北境', content: '北境的雪原上，少年第一次握剑。' },
     { title: '第二章 入宗', content: '宗门大比在即。' },
@@ -56,7 +56,7 @@ it('FakeLLM 脚本化响应抽取单章：条目入队、章节标记完成、�
 
 it('大文件分章后抽取可断点续跑：limit 控制批量，失败章节保持 pending 可重试', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [
     { title: '第一章 甲', content: '甲。' },
     { title: '第二章 乙', content: '乙。' },
@@ -86,7 +86,7 @@ it('大文件分章后抽取可断点续跑：limit 控制批量，失败章节�
 
 it('LLM 返回非法 JSON 时该章失败且保持 pending', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = { extract: [{ content: '这不是 JSON', model: 'fake' }] };
 
@@ -99,7 +99,7 @@ it('LLM 返回非法 JSON 时该章失败且保持 pending', async () => {
 
 it('LLM 条目混入非法项时仅丢弃非法项', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = {
     extract: [
@@ -123,7 +123,7 @@ it('LLM 条目混入非法项时仅丢弃非法项', async () => {
 
 it('确认入库自动带出处溯源，确认后条目归档', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 北境', content: '北境的雪。' }], '《参考书甲》');
   env.llm.script.respondSequence = { extract: [extractResult(CHAPTER_1_ITEMS)] };
   await env.request.post(`/api/references/${reference.id}/extract`, {});
@@ -152,7 +152,7 @@ it('确认入库自动带出处溯源，确认后条目归档', async () => {
 
 it('确认前可修改条目字段（按类型校验）', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = { extract: [extractResult([{ type: 'setting', title: '原题', content: '原文。', payload: { category: '势力' } }])] };
   await env.request.post(`/api/references/${reference.id}/extract`, {});
@@ -171,7 +171,7 @@ it('确认前可修改条目字段（按类型校验）', async () => {
 
 it('确认前修改 payload 按键合并：skeleton 只改一键不丢其余键', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = {
     extract: [
@@ -199,7 +199,7 @@ it('确认前修改 payload 按键合并：skeleton 只改一键不丢其余键'
 
 it('重名素材触发去重：未选择处理方式 409，三种处理方式均生效', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const existing = await seedMaterial(env.request, { type: 'setting', title: '玄天宗', payload: { category: '势力' } });
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = {
@@ -225,7 +225,7 @@ it('重名素材触发去重：未选择处理方式 409，三种处理方式均
 
 it('resolution=new 允许同名新建第二条素材', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   await seedMaterial(env.request, { type: 'setting', title: '玄天宗' });
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = {
@@ -242,7 +242,7 @@ it('resolution=new 允许同名新建第二条素材', async () => {
 
 it('resolution=merge 追加内容、补齐 payload 缺键并把人工溯源升级为参考书溯源', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const existing = await seedMaterial(env.request, {
     type: 'setting',
     title: '玄天宗',
@@ -275,7 +275,7 @@ it('resolution=merge 追加内容、补齐 payload 缺键并把人工溯源升�
 
 it('拒绝条目后不再出现在待确认队列；重复处理已归档条目报错', async () => {
   const env = createTestApp();
-  await configureExtractRoute(env.request);
+  await configureRoute(env.request, 'extract');
   const reference = await seedReference(env.request, [{ title: '第一章 甲', content: '甲。' }]);
   env.llm.script.respondSequence = { extract: [extractResult(CHAPTER_1_ITEMS)] };
   await env.request.post(`/api/references/${reference.id}/extract`, {});
