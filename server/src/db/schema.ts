@@ -73,4 +73,31 @@ export const MIGRATIONS: readonly string[] = [
     INSERT INTO materials_fts(rowid, search_text) VALUES (new.id, new.search_text);
   END;
   `,
+
+  // v3：书架与书内素材引用（T3）。引用 + 覆写语义：book_materials.overrides 补丁遮蔽全局素材
+  // 的同名字段，永不回写；书或素材删除时引用行级联清理，全局素材互不受影响
+  `
+  CREATE TABLE books (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    genre TEXT NOT NULL DEFAULT '',
+    tone TEXT NOT NULL DEFAULT '',
+    promise TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_books_updated_at ON books(updated_at DESC);
+
+  CREATE TABLE book_materials (
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    material_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+    overrides TEXT NOT NULL DEFAULT '{}',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    PRIMARY KEY (book_id, material_id)
+  );
+
+  CREATE INDEX idx_book_materials_material ON book_materials(material_id);
+  `,
 ];
