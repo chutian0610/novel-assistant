@@ -5,6 +5,7 @@ import { healthRoutes } from './api/health';
 import { settingsRoutes } from './api/settings';
 import { materialsRoutes } from './api/materials';
 import { booksRoutes } from './api/books';
+import { outlinesRoutes } from './api/outlines';
 import { referencesRoutes } from './api/references';
 import { errorHandler, requestLogger } from './api/middleware';
 
@@ -22,6 +23,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/settings', settingsRoutes(deps));
   app.route('/api', materialsRoutes(deps));
   app.route('/api', booksRoutes(deps));
+  app.route('/api', outlinesRoutes(deps));
   app.route('/api', referencesRoutes(deps));
   app.notFound((c) => c.json({ error: '接口不存在' }, 404));
   return app;

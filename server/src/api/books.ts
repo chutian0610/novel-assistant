@@ -48,8 +48,8 @@ const bookPatchSchema = z
   .strict()
   .refine((patch) => Object.keys(patch).length > 0, '至少提供一个要更新的字段');
 
-/** 路由通用的取书 + 404 前导 */
-function requireBook(db: DB, id: number, rawId: string): BookRecord {
+/** 路由通用的取书 + 404 前导（书详情类路由共享） */
+export function requireBook(db: DB, id: number, rawId: string): BookRecord {
   const book = getBook(db, id);
   if (!book) throw new HttpError(404, `书 ${rawId} 不存在`);
   return book;

@@ -112,6 +112,54 @@ export interface BookMaterialListResponse {
   total: number;
 }
 
+// ---- 两级大纲（与 server/src/outlines/store.ts 为镜像副本，增删字段须两处同步） ----
+
+// 章纲状态机：草稿→已批准→锁定；锁定后仅可显式解锁回「已批准」
+export type OutlineStatus = 'draft' | 'approved' | 'locked';
+
+export const OUTLINE_STATUS_LABELS: Record<OutlineStatus, string> = {
+  draft: '草稿',
+  approved: '已批准',
+  locked: '锁定',
+};
+
+export interface Volume {
+  id: number;
+  bookId: number;
+  title: string;
+  /** 卷纲内容：本卷叙事弧线概述 */
+  summary: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ChapterOutline {
+  id: number;
+  volumeId: number;
+  title: string;
+  /** 章纲内容：本章剧情展开概要 */
+  summary: string;
+  status: OutlineStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface OutlineTree {
+  volumes: (Volume & { chapters: ChapterOutline[] })[];
+}
+
+/** AI 展开方案：作者选定其中一个后写入章纲（index 从 1 起） */
+export interface ExpansionOption {
+  index: number;
+  title: string;
+  summary: string;
+}
+
+export interface ExpansionResult {
+  options: ExpansionOption[];
+  model: string;
+}
+
 // ---- 拆书提取（与 server/src/references/store.ts 为镜像副本，增删字段须两处同步） ----
 
 export type ReferenceFormat = 'txt' | 'epub';
