@@ -160,6 +160,89 @@ export interface ExpansionResult {
   model: string;
 }
 
+// ---- 事实四表（与 server/src/facts/store.ts 为镜像副本，增删字段须两处同步） ----
+
+export type CharacterStateCategory = 'injury' | 'secret' | 'possession' | 'realm' | 'other';
+
+export const CHARACTER_STATE_CATEGORY_LABELS: Record<CharacterStateCategory, string> = {
+  injury: '伤势',
+  secret: '秘密',
+  possession: '持有物',
+  realm: '境界',
+  other: '其他',
+};
+
+/** 角色运行时：人物在某章的动态状态，带来源章与原文证据 */
+export interface CharacterState {
+  id: number;
+  bookId: number;
+  name: string;
+  chapter: number;
+  category: CharacterStateCategory;
+  content: string;
+  evidence: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 人物关系：有向边 from → to */
+export interface CharacterRelation {
+  id: number;
+  bookId: number;
+  fromName: string;
+  toName: string;
+  relation: string;
+  chapter: number;
+  evidence: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TimelineEvent {
+  id: number;
+  bookId: number;
+  chapter: number;
+  title: string;
+  content: string;
+  evidence: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type ForeshadowStatus = 'planted' | 'progressing' | 'resolved' | 'abandoned';
+
+export const FORESHADOW_STATUS_LABELS: Record<ForeshadowStatus, string> = {
+  planted: '已埋设',
+  progressing: '推进中',
+  resolved: '已回收',
+  abandoned: '已放弃',
+};
+
+export interface Foreshadow {
+  id: number;
+  bookId: number;
+  title: string;
+  content: string;
+  status: ForeshadowStatus;
+  /** 埋设章 */
+  plantedChapter: number;
+  /** 目标章：当前章超过此章仍未回收即预警 */
+  targetChapter: number;
+  evidence: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 伏笔视图 = 账本记录 + 预警标志 */
+export interface ForeshadowView extends Foreshadow {
+  overdue: boolean;
+}
+
+export interface FactListResponse<T> {
+  items: T[];
+  total: number;
+}
+
 // ---- 拆书提取（与 server/src/references/store.ts 为镜像副本，增删字段须两处同步） ----
 
 export type ReferenceFormat = 'txt' | 'epub';

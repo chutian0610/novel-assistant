@@ -795,3 +795,93 @@ h3 {
   margin: 8px 0 0;
   white-space: pre-wrap;
 }
+
+/* ---- 事实面板 ---- */
+.relation-graph {
+  width: 100%;
+  height: auto;
+  margin-bottom: 14px;
+}
+.relation-node {
+  fill: #eef3fe;
+  stroke: var(--accent);
+  stroke-width: 1.5;
+}
+.relation-node-label {
+  font-size: 13px;
+  fill: var(--text);
+  pointer-events: none;
+}
+.relation-label {
+  font-size: 12px;
+  fill: var(--muted);
+  paint-order: stroke;
+  stroke: #fff;
+  stroke-width: 3px;
+}
+.fact-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.fact-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.fact-item-overdue {
+  border-color: var(--danger);
+  background: #fdf1f1;
+}
+.fact-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.fact-arrow {
+  color: var(--muted);
+}
+.fact-actions {
+  display: flex;
+  gap: 6px;
+  margin-left: auto;
+}
+.fact-content {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+}
+.fact-evidence {
+  margin: 4px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+.overdue-flag {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--danger);
+}
+.badge-foreshadow-planted {
+  background: #eef3fe;
+  color: var(--accent);
+}
+.badge-foreshadow-progressing {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.badge-foreshadow-resolved {
+  background: #e6f4ea;
+  color: var(--ok);
+}
+.badge-foreshadow-abandoned {
+  background: #f0f1f3;
+  color: var(--muted);
+}
+.chapter-input {
+  width: 84px;
+  padding: 2px 8px;
+  display: inline-block;
+}

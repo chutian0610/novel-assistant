@@ -19,7 +19,7 @@ import type { DB } from '../db/open';
 import { getMaterial } from '../materials/store';
 import { HttpError } from './errors';
 import { parseMaterialFieldPatch } from './material-patch';
-import { parseBody, parseId, parsePaginationInt, readJson } from './validate';
+import { parseBody, parseId, parseQueryInt, readJson } from './validate';
 
 /** 书契约元数据的基础规则；创建时包 default('')，PATCH 时包 optional（不带默认值防泄漏） */
 const contractRules = {
@@ -63,8 +63,8 @@ export function booksRoutes(deps: { db: DB }) {
   app.get('/books', (c) => {
     return c.json(
       listBooks(db, {
-        limit: parsePaginationInt(c.req.query('limit'), 'limit', 1, 200, 50),
-        offset: parsePaginationInt(c.req.query('offset'), 'offset', 0, Number.MAX_SAFE_INTEGER, 0),
+        limit: parseQueryInt(c.req.query('limit'), 'limit', 1, 200, 50),
+        offset: parseQueryInt(c.req.query('offset'), 'offset', 0, Number.MAX_SAFE_INTEGER, 0),
       })
     );
   });

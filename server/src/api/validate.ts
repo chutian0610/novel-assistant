@@ -31,8 +31,8 @@ export function parseId(raw: string): number {
   return id;
 }
 
-/** 查询参数分页整数：缺失/空串用默认值，非法值 400 */
-export function parsePaginationInt(raw: string | undefined, name: string, min: number, max: number, fallback: number): number {
+/** 查询参数整数（分页/章号等）：缺失/空串用默认值，非法值 400 */
+export function parseQueryInt(raw: string | undefined, name: string, min: number, max: number, fallback: number): number {
   if (raw === undefined || raw === '') return fallback;
   const value = Number(raw);
   if (!Number.isInteger(value) || value < min || value > max) {
