@@ -885,3 +885,90 @@ h3 {
   padding: 2px 8px;
   display: inline-block;
 }
+
+/* ---- 注入视图预览（T9） ---- */
+.pack-controls {
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.pack-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.pack-field select {
+  min-width: 280px;
+}
+.pack-budget-input {
+  width: 140px;
+}
+.pack-summary {
+  flex: 1;
+  min-width: 220px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pack-summary-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.pack-over-flag {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+  border-radius: var(--radius);
+  padding: 1px 8px;
+  font-size: 12px;
+}
+.pack-bar {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--border);
+  overflow: hidden;
+}
+.pack-bar-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+.pack-bar-fill.pack-bar-over {
+  background: var(--danger);
+}
+.pack-layer-relevance > .panel-head h2 .chip {
+  margin-left: 6px;
+}
+.pack-chip-warn {
+  color: var(--warn-text);
+  background: var(--warn-bg);
+}
+.pack-items {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pack-item {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 12px;
+}
+.pack-item-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pack-item-tokens {
+  margin-left: auto;
+}
+.pack-item-text {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
