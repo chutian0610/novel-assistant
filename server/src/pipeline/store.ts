@@ -1,6 +1,21 @@
 import { touchBook } from '../books/store';
+import type { DetectionReport, MetricResult } from '../detectors/metrics';
 import type { DB } from '../db/open';
 import type { InjectionView } from '../packing/pack';
+
+/** LLM 语义核查报告（verify 任务路由产出，对照事实库） */
+export interface SemanticConflict {
+  /** 正文中矛盾的原句 */
+  quote: string;
+  /** 矛盾说明 */
+  explanation: string;
+  /** 冲突的事实摘要（可为空串） */
+  factHint: string;
+}
+
+export interface SemanticReport {
+  conflicts: SemanticConflict[];
+}
 
 /**
  * 章节管线持久层（T10）：章节实例、版本快照、管线状态表三张表的数据访问。
@@ -8,14 +23,18 @@ import type { InjectionView } from '../packing/pack';
  */
 
 /** 管线阶段：stage 记录「下一个待执行阶段」，done 表示全部完成 */
-export const PIPELINE_STAGES = ['prepare', 'draft', 'commit', 'done'] as const;
+export const PIPELINE_STAGES = ['prepare', 'draft', 'verify', 'fix', 'commit', 'done'] as const;
 export type PipelineStage = (typeof PIPELINE_STAGES)[number];
 
-export type PipelineStatus = 'running' | 'done' | 'failed';
+/** 管线状态：suspended = 闸门未过，挂起等待人工裁决（挂起队列处理） */
+export const PIPELINE_STATUSES = ['running', 'done', 'failed', 'suspended'] as const;
+export type PipelineStatus = (typeof PIPELINE_STATUSES)[number];
 
 export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
   prepare: '准备',
   draft: '草稿',
+  verify: '核查',
+  fix: '修订',
   commit: '落盘',
   done: '完成',
 };
@@ -24,6 +43,7 @@ export const PIPELINE_STATUS_LABELS: Record<PipelineStatus, string> = {
   running: '进行中',
   done: '已完成',
   failed: '失败',
+  suspended: '已挂起',
 };
 
 /** 快照来源：管线 commit / 人工编辑 / 快照回退 */
@@ -40,8 +60,14 @@ export interface PipelineRunRecord {
   error: string | null;
   /** prepare 产物：注入视图（落盘为 JSON，draft 复用，断点续跑不重算） */
   preparedView: InjectionView | null;
-  /** draft 产物：正文草稿（commit 复用） */
+  /** draft/fix 产物：当前正文草稿（commit 复用） */
   draftContent: string | null;
+  /** 已执行的定向重写轮数 */
+  fixRounds: number;
+  /** verify 产物：8 维检测报告（双报告之一；fix 每轮重写后清空待复检） */
+  detectionReport: DetectionReport | null;
+  /** verify 产物：LLM 语义核查报告（双报告之二） */
+  semanticReport: SemanticReport | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -78,6 +104,9 @@ interface RunRow {
   error: string | null;
   prepared_view: string | null;
   draft_content: string | null;
+  fix_rounds: number;
+  detection_report: string | null;
+  semantic_report: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -116,20 +145,28 @@ function toRunRecord(row: RunRow): PipelineRunRecord {
     error: row.error,
     preparedView: parsePreparedView(row.prepared_view),
     draftContent: row.draft_content,
+    fixRounds: row.fix_rounds,
+    detectionReport: parseJson(row.detection_report) as DetectionReport | null,
+    semanticReport: parseJson(row.semantic_report) as SemanticReport | null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
 }
 
-function parsePreparedView(raw: string | null): InjectionView | null {
+/** 落盘 JSON → 对象；脏值统一按缺失处理（断点续跑据此重跑该阶段） */
+function parseJson(raw: string | null): unknown {
   if (raw === null) return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return null;
-    return parsed as InjectionView;
+    return parsed;
   } catch {
     return null;
   }
+}
+
+function parsePreparedView(raw: string | null): InjectionView | null {
+  return parseJson(raw) as InjectionView | null;
 }
 
 export function getRun(db: DB, bookId: number, idx: number): PipelineRunRecord | null {
@@ -151,8 +188,14 @@ export interface RunStagePatch {
   error: string | null;
   /** 传入则覆写 prepare 产物 */
   preparedView?: InjectionView | null;
-  /** 传入则覆写 draft 产物 */
+  /** 传入则覆写 draft/fix 产物 */
   draftContent?: string | null;
+  /** 传入则覆写 fix 轮数 */
+  fixRounds?: number;
+  /** 传入则覆写检测报告（null = 清空待复检） */
+  detectionReport?: DetectionReport | null;
+  /** 传入则覆写语义核查报告（null = 清空待复检） */
+  semanticReport?: SemanticReport | null;
 }
 
 /** 阶段推进统一入口：每次阶段执行（成功或失败）恰好调用一次，attempts 由调用方累计 */
@@ -164,6 +207,9 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
     'error = ?',
     patch.preparedView !== undefined ? 'prepared_view = ?' : null,
     patch.draftContent !== undefined ? 'draft_content = ?' : null,
+    patch.fixRounds !== undefined ? 'fix_rounds = ?' : null,
+    patch.detectionReport !== undefined ? 'detection_report = ?' : null,
+    patch.semanticReport !== undefined ? 'semantic_report = ?' : null,
     `updated_at = ${NOW}`,
   ].filter((item): item is string => item !== null);
   const values: (string | number | null)[] = [
@@ -177,6 +223,15 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
   }
   if (patch.draftContent !== undefined) {
     values.push(patch.draftContent);
+  }
+  if (patch.fixRounds !== undefined) {
+    values.push(patch.fixRounds);
+  }
+  if (patch.detectionReport !== undefined) {
+    values.push(patch.detectionReport === null ? null : JSON.stringify(patch.detectionReport));
+  }
+  if (patch.semanticReport !== undefined) {
+    values.push(patch.semanticReport === null ? null : JSON.stringify(patch.semanticReport));
   }
   values.push(bookId, idx);
   db.prepare(`UPDATE pipeline_runs SET ${assignments.join(', ')} WHERE book_id = ? AND idx = ?`).run(...values);
@@ -299,4 +354,264 @@ export function getChapterId(db: DB, bookId: number, idx: number): number | null
     | { id: number }
     | undefined;
   return row ? row.id : null;
+}
+
+// ---------- commit（generate 与挂起队列动作共用的落盘出口） ----------
+
+/** 滚动摘要：压平全部空白后取前 N 字，截断补省略号（content 的确定性派生物） */
+export const SUMMARY_MAX_CHARS = 200;
+
+export function deriveSummary(content: string): string {
+  const flat = content.replace(/\s+/g, '');
+  return flat.length <= SUMMARY_MAX_CHARS ? flat : `${flat.slice(0, SUMMARY_MAX_CHARS)}……`;
+}
+
+/** 注入视图中的章纲条目（commit 的标题/章纲指向来源） */
+function chapterOutlineTarget(view: InjectionView): { title: string; refId: number | null } {
+  const item = view.layers
+    .flatMap((layer) => layer.items)
+    .find((item) => item.refType === 'chapter-outline');
+  if (!item) throw new Error('注入视图缺少章纲条目（buildInjectionView 契约被破坏）');
+  return { title: item.title, refId: item.refId };
+}
+
+export interface CommitOutcome {
+  chapterId: number;
+  chapter: ChapterRecord;
+  run: PipelineRunRecord;
+  snapshots: ChapterSnapshotRecord[];
+}
+
+/**
+ * commit 阶段：单事务原子落盘（正文 + 版本快照 + run 终态）。
+ * 闸门放行后的唯一出口：generate 主流程与挂起队列的重写/裁决动作都经由这里收尾。
+ */
+export function commitChapterRun(db: DB, bookId: number, idx: number): CommitOutcome {
+  const run = getRun(db, bookId, idx);
+  if (!run) throw new Error('管线状态缺失');
+  const draft = run.draftContent;
+  if (draft === null) throw new Error('draft 产物缺失（断点状态不一致）');
+  if (!run.preparedView) throw new Error('prepare 产物缺失（断点状态不一致）');
+  const target = chapterOutlineTarget(run.preparedView);
+  const summary = deriveSummary(draft);
+  const chapterId = db.transaction((): number => {
+    const id = upsertChapter(db, bookId, idx, {
+      title: target.title,
+      outlineId: target.refId,
+      content: draft,
+      summary,
+    });
+    insertSnapshot(db, id, draft, summary, 'pipeline');
+    advanceRun(db, bookId, idx, { stage: 'done', status: 'done', attempts: run.attempts + 1, error: null });
+    touchBook(db, bookId);
+    return id;
+  })();
+
+  const chapter = getChapter(db, bookId, idx);
+  if (!chapter) throw new Error('commit 事务后章节缺失（事务原子性被破坏）');
+  return { chapterId, chapter, run: getRun(db, bookId, idx)!, snapshots: listSnapshots(db, chapterId) };
+}
+
+// ---------- 指标落库（verify 双报告之一，跨章趋势数据源） ----------
+
+export interface ChapterMetricsRecord {
+  bookId: number;
+  idx: number;
+  aiScore: number;
+  confidence: number;
+  adjustedScore: number;
+  wordCount: number;
+  /** 8 维指标结果（不含正文句子，报告全文挂在 run 上） */
+  metrics: MetricResult[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface MetricsRow {
+  book_id: number;
+  idx: number;
+  ai_score: number;
+  confidence: number;
+  adjusted_score: number;
+  word_count: number;
+  metrics: string;
+  created_at: string;
+  updated_at: string;
+}
+
+function toMetricsRecord(row: MetricsRow): ChapterMetricsRecord {
+  return {
+    bookId: row.book_id,
+    idx: row.idx,
+    aiScore: row.ai_score,
+    confidence: row.confidence,
+    adjustedScore: row.adjusted_score,
+    wordCount: row.word_count,
+    metrics: (parseJson(row.metrics) as MetricResult[] | null) ?? [],
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export interface MetricsUpsertInput {
+  aiScore: number;
+  confidence: number;
+  adjustedScore: number;
+  wordCount: number;
+  metrics: MetricResult[];
+}
+
+/** verify 完成（或人工编辑重算）时 upsert 指标：每章保留最新一份 */
+export function upsertChapterMetrics(db: DB, bookId: number, idx: number, input: MetricsUpsertInput): void {
+  db.prepare(
+    `INSERT INTO chapter_metrics (book_id, idx, ai_score, confidence, adjusted_score, word_count, metrics)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (book_id, idx) DO UPDATE SET
+       ai_score = excluded.ai_score,
+       confidence = excluded.confidence,
+       adjusted_score = excluded.adjusted_score,
+       word_count = excluded.word_count,
+       metrics = excluded.metrics,
+       updated_at = ${NOW}`
+  ).run(bookId, idx, input.aiScore, input.confidence, input.adjustedScore, input.wordCount, JSON.stringify(input.metrics));
+}
+
+/** 全书指标，按章号升序（跨章趋势） */
+export function listChapterMetrics(db: DB, bookId: number): ChapterMetricsRecord[] {
+  const rows = db
+    .prepare('SELECT * FROM chapter_metrics WHERE book_id = ? ORDER BY idx')
+    .all(bookId) as MetricsRow[];
+  return rows.map(toMetricsRecord);
+}
+
+// ---------- 挂起队列（闸门未过的人工裁决清单） ----------
+
+export type SuspensionSource = 'detection' | 'semantic';
+export type SuspensionResolution = 'rewrite' | 'ignore' | 'fact' | 'auto';
+
+export interface SuspensionDetail {
+  /** 检测项：命中的指标键 */
+  metricKey?: string;
+  /** 检测项：问题句索引与原文 */
+  hits?: number[];
+  sentences?: string[];
+  /** 全文级维度聚合项：无法定位段落的维度键列表 */
+  metricKeys?: string[];
+  fullText?: boolean;
+  /** 语义项：矛盾原句（重写定位用） */
+  quote?: string;
+  explanation?: string;
+  factHint?: string;
+}
+
+export interface SuspensionRecord {
+  id: number;
+  bookId: number;
+  idx: number;
+  source: SuspensionSource;
+  title: string;
+  reason: string;
+  detail: SuspensionDetail;
+  /** 创建时的 fix 轮次：闸门只看当前轮的检测项 */
+  round: number;
+  status: 'pending' | 'resolved';
+  resolution: SuspensionResolution | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface SuspensionRow {
+  id: number;
+  book_id: number;
+  idx: number;
+  source: SuspensionSource;
+  title: string;
+  reason: string;
+  detail: string;
+  round: number;
+  status: 'pending' | 'resolved';
+  resolution: SuspensionResolution | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function toSuspensionRecord(row: SuspensionRow): SuspensionRecord {
+  return {
+    id: row.id,
+    bookId: row.book_id,
+    idx: row.idx,
+    source: row.source,
+    title: row.title,
+    reason: row.reason,
+    detail: (parseJson(row.detail) as SuspensionDetail | null) ?? {},
+    round: row.round,
+    status: row.status,
+    resolution: row.resolution,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  };
+}
+
+export function createSuspension(
+  db: DB,
+  bookId: number,
+  idx: number,
+  input: {
+    source: SuspensionSource;
+    title: string;
+    reason?: string;
+    detail: SuspensionDetail;
+    round: number;
+  }
+): void {
+  db.prepare(
+    'INSERT INTO pipeline_suspensions (book_id, idx, source, title, reason, detail, round) VALUES (?, ?, ?, ?, ?, ?, ?)'
+  ).run(bookId, idx, input.source, input.title, input.reason ?? '', JSON.stringify(input.detail), input.round);
+}
+
+export function getSuspension(db: DB, bookId: number, idx: number, id: number): SuspensionRecord | null {
+  const row = db
+    .prepare('SELECT * FROM pipeline_suspensions WHERE book_id = ? AND idx = ? AND id = ?')
+    .get(bookId, idx, id) as SuspensionRow | undefined;
+  return row ? toSuspensionRecord(row) : null;
+}
+
+/** 挂起队列：默认全部（最新在前），可按 pending 过滤；可按书聚合或按章过滤 */
+export function listSuspensions(db: DB, bookId: number, options: { idx?: number; pendingOnly?: boolean } = {}): SuspensionRecord[] {
+  const clauses = ['book_id = ?'];
+  const values: (number | string)[] = [bookId];
+  if (options.idx !== undefined) {
+    clauses.push('idx = ?');
+    values.push(options.idx);
+  }
+  if (options.pendingOnly) {
+    clauses.push("status = 'pending'");
+  }
+  const rows = db
+    .prepare(`SELECT * FROM pipeline_suspensions WHERE ${clauses.join(' AND ')} ORDER BY id DESC`)
+    .all(...values) as SuspensionRow[];
+  return rows.map(toSuspensionRecord);
+}
+
+export function countPendingSuspensions(db: DB, bookId: number, idx: number, source?: SuspensionSource): number {
+  const row = (
+    source
+      ? db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM pipeline_suspensions WHERE book_id = ? AND idx = ? AND source = ? AND status = 'pending'"
+          )
+          .get(bookId, idx, source)
+      : db
+          .prepare("SELECT COUNT(*) AS count FROM pipeline_suspensions WHERE book_id = ? AND idx = ? AND status = 'pending'")
+          .get(bookId, idx)
+  ) as { count: number };
+  return row.count;
+}
+
+/** 裁决/自动消除挂起项 */
+export function resolveSuspension(db: DB, bookId: number, idx: number, id: number, resolution: SuspensionResolution): void {
+  db.prepare(
+    `UPDATE pipeline_suspensions SET status = 'resolved', resolution = ?, updated_at = ${NOW}
+     WHERE book_id = ? AND idx = ? AND id = ?`
+  ).run(resolution, bookId, idx, id);
 }

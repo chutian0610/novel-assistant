@@ -1,11 +1,14 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import { requireBook } from './books';
+import { getDetectorConfig } from '../detectors/config';
+import { analyzeText } from '../detectors/metrics';
 import type { DB } from '../db/open';
 import { RouteNotConfiguredError } from '../llm/routed';
 import type { LLMProvider } from '../llm/types';
 import { PackingRangeError } from '../packing/pack';
-import { deriveSummary, PipelinePreconditionError, PipelineStageError, runChapterPipeline } from '../pipeline/run';
+import { deriveSummary, PipelinePreconditionError, runChapterPipeline } from '../pipeline/run';
+import { PipelineStageError } from '../pipeline/verify';
 import {
   getChapter,
   getChapterId,
@@ -17,6 +20,7 @@ import {
   PIPELINE_STAGE_LABELS,
   PIPELINE_STATUS_LABELS,
   updateChapterContent,
+  upsertChapterMetrics,
   type PipelineRunRecord,
 } from '../pipeline/store';
 import { HttpError } from './errors';
@@ -51,9 +55,10 @@ export interface ChapterListItem {
 }
 
 /**
- * 第六组路由：章节管线与写作台（T10）。
- * POST /books/:id/chapters/:idx/generate 启动/续跑 prepare→draft→commit；
- * GET 列表与详情、PATCH 编辑正文、POST revert 回退快照。verify/fix 为后续工单。
+ * 章节管线与写作台路由（T10 骨架 + T11 闭环）。
+ * POST /books/:id/chapters/:idx/generate 启动/续跑 prepare→draft→verify→fix→commit
+ * （闸门未过时挂起，经挂起队列裁决后由 rewrite/resolve 续跑）；
+ * GET 列表与详情、PATCH 编辑正文（指标派生物同步重算）、POST revert 回退快照。
  */
 export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
   const { db, llm } = deps;
@@ -113,6 +118,15 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       updateChapterContent(db, bookId, idx, content, summary);
       insertSnapshot(db, chapterId, content, summary, 'edit');
     })();
+    // 指标派生物同步重算（纯检测，不走 LLM；语义报告随下次 verify 刷新）
+    const detection = analyzeText(content, getDetectorConfig(db));
+    upsertChapterMetrics(db, bookId, idx, {
+      aiScore: detection.aiScore,
+      confidence: detection.confidence,
+      adjustedScore: detection.adjustedScore,
+      wordCount: detection.wordCount,
+      metrics: detection.metrics,
+    });
     return c.json(getChapter(db, bookId, idx));
   });
 
@@ -131,6 +145,15 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       updateChapterContent(db, bookId, idx, snapshot.content, snapshot.summary);
       insertSnapshot(db, chapterId, snapshot.content, snapshot.summary, 'revert');
     })();
+    // 指标派生物跟随正文重算（与编辑同规则：纯检测，不走 LLM）
+    const detection = analyzeText(snapshot.content, getDetectorConfig(db));
+    upsertChapterMetrics(db, bookId, idx, {
+      aiScore: detection.aiScore,
+      confidence: detection.confidence,
+      adjustedScore: detection.adjustedScore,
+      wordCount: detection.wordCount,
+      metrics: detection.metrics,
+    });
     return c.json(getChapter(db, bookId, idx));
   });
 
@@ -139,7 +162,7 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
 
 // ---------- 内部 ----------
 
-/** 正文写入守卫：管线未完成（running/failed）时拒绝编辑与回退，避免续跑覆盖人工修改 */
+/** 正文写入守卫：管线未完成（running/failed/suspended）时拒绝编辑与回退，避免续跑覆盖人工修改 */
 function assertRunSettled(db: DB, bookId: number, idx: number): void {
   const run = getRun(db, bookId, idx);
   if (run && run.status !== 'done') {

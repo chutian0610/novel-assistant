@@ -11,31 +11,31 @@ import {
   type FlatChapter,
   type InjectionView,
 } from '../packing/pack';
+import { driveVerification, failRun } from './verify';
 import {
   advanceRun,
+  commitChapterRun,
   createRun,
-  getChapter,
+  deriveSummary,
   getRun,
-  insertSnapshot,
-  listSnapshots,
-  upsertChapter,
   type ChapterRecord,
+  type ChapterSnapshotRecord,
   type PipelineRunRecord,
-  type PipelineStage,
 } from './store';
 
 /**
- * 章节管线执行器（T10，ADR-0001 前三阶段）：prepare → draft → commit。
+ * 章节管线执行器（ADR-0001 五阶段状态机，T10 骨架 + T11 闭环）：prepare → draft → verify → fix → commit。
  *
  * 断点续跑契约（spec 用户故事 22）：
  * - 管线状态表 pipeline_runs 按（书，章号）唯一，stage 记录下一个待执行阶段；
- * - 每个阶段的产物先落盘再进入下一阶段：prepare 落注入视图 JSON，draft 落正文草稿；
+ * - 每个阶段的产物先落盘再进入下一阶段：prepare 落注入视图 JSON，draft 落正文草稿，
+ *   verify 落双报告（8 维检测 + LLM 语义核查）；fix 每轮重写落新草稿并清报告强制复检；
  * - 重启后续跑时，产物已在的阶段直接跳过——LLM 不重复调用、装填不重复计算；
  * - 失败（LLM 出错/路由未配置/返回空正文）落盘为 failed，可再次调用从断点恢复；
+ * - verify→fix 闸门未过（重写轮次用尽 / 语义冲突）→ status=suspended 挂起，经挂起队列裁决后续跑；
  * - 已 done 的章再次生成 = 全新 run 重跑（覆盖正文并新增 pipeline 快照）。
  *
  * commit 在单事务内原子更新正文与派生物（章节行 + pipeline 快照 + run 终态）。
- * verify/fix 阶段为后续工单，接入后在 draft 与 commit 之间插入同样的「产物落盘」环节。
  */
 
 /** 前置校验失败（章纲缺失/超范围/未批准）——不创建运行记录，API 层映射 409 */
@@ -46,22 +46,8 @@ export class PipelinePreconditionError extends Error {
   }
 }
 
-/** 阶段执行失败（产物已落盘、run 已记 failed），API 层映射 502 */
-export class PipelineStageError extends Error {
-  constructor(
-    public readonly stage: PipelineStage,
-    message: string
-  ) {
-    super(message);
-    this.name = 'PipelineStageError';
-  }
-}
-
 /** 单章字数规格（CONTEXT.md「书」：2000-4000 字）对应的上限 */
 const DRAFT_MAX_TOKENS = 8192;
-
-/** 滚动摘要上限：V1 为确定性截断摘要（后续工单可换 LLM 摘要并纳入断点续跑） */
-const SUMMARY_MAX_CHARS = 200;
 
 const DRAFT_SYSTEM_PROMPT = `你是网文作者。根据给定的书契约、本章大纲、出场角色运行时与相关素材，写出本章正文。要求：
 - 只输出正文本身：不要输出章节标题、序号、小标题、说明或任何额外文字。
@@ -69,12 +55,13 @@ const DRAFT_SYSTEM_PROMPT = `你是网文作者。根据给定的书契约、本
 - 遵守书契约的题材与基调，按本章大纲推进剧情，人物言行与角色运行时保持一致。`;
 
 export interface PipelineResult {
-  chapter: ChapterRecord;
+  /** commit 完成返回章节；挂起（闸门未过）返回 null */
+  chapter: ChapterRecord | null;
   run: PipelineRunRecord;
-  snapshots: ReturnType<typeof listSnapshots>;
+  snapshots: ChapterSnapshotRecord[];
 }
 
-/** 启动或续跑指定章的生成管线，返回 commit 后的章节、运行状态与快照 */
+/** 启动或续跑指定章的生成管线，返回 commit 后的章节、运行状态与快照（挂起时章节为 null） */
 export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: number, idx: number): Promise<PipelineResult> {
   // API 层已 requireBook；防御性兜底
   if (!getBook(db, bookId)) throw new Error(`书 ${bookId} 不存在（应先由 API 层 404 拦截）`);
@@ -101,6 +88,9 @@ export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: numbe
       error: null,
       preparedView: null,
       draftContent: null,
+      fixRounds: 0,
+      detectionReport: null,
+      semanticReport: null,
     });
     run = getRun(db, bookId, idx)!;
   }
@@ -140,7 +130,7 @@ export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: numbe
       failRun(db, bookId, idx, run.attempts + 1, 'draft', cause);
     }
     advanceRun(db, bookId, idx, {
-      stage: 'commit',
+      stage: 'verify',
       status: 'running',
       attempts: run.attempts + 1,
       error: null,
@@ -148,36 +138,18 @@ export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: numbe
     });
     run = getRun(db, bookId, idx)!;
   }
-  const draft = run.draftContent;
-  if (draft === null) throw new Error('draft 产物缺失（断点状态不一致）');
+
+  // ---------- verify→fix 闭环：双报告 + 定向重写 + 挂起闸门（详见 pipeline/verify.ts） ----------
+  const verdict = await driveVerification(db, llm, bookId, idx);
+  if (verdict === 'suspended') {
+    return { chapter: null, run: getRun(db, bookId, idx)!, snapshots: [] };
+  }
 
   // ---------- commit：单事务原子落盘（正文 + 版本快照 + run 终态） ----------
-  const target = requireChapterOutlineItem(view);
-  const summary = deriveSummary(draft);
-  const chapterId = db.transaction((): number => {
-    const id = upsertChapter(db, bookId, idx, {
-      title: target.title,
-      outlineId: target.refId,
-      content: draft,
-      summary,
-    });
-    insertSnapshot(db, id, draft, summary, 'pipeline');
-    advanceRun(db, bookId, idx, { stage: 'done', status: 'done', attempts: run.attempts + 1, error: null });
-    touchBook(db, bookId);
-    return id;
-  })();
-
-  const chapter = getChapter(db, bookId, idx);
-  if (!chapter) throw new Error('commit 事务后章节缺失（事务原子性被破坏）');
-  const finalRun = getRun(db, bookId, idx)!;
-  return { chapter, run: finalRun, snapshots: listSnapshots(db, chapterId) };
+  return commitChapterRun(db, bookId, idx);
 }
 
-/** 滚动摘要：压平全部空白后取前 N 字，截断补省略号（content 的确定性派生物） */
-export function deriveSummary(content: string): string {
-  const flat = content.replace(/\s+/g, '');
-  return flat.length <= SUMMARY_MAX_CHARS ? flat : `${flat.slice(0, SUMMARY_MAX_CHARS)}……`;
-}
+export { deriveSummary };
 
 // ---------- 内部 ----------
 
@@ -207,28 +179,4 @@ function buildDraftMessages(view: InjectionView): ChatMessage[] {
     { role: 'system', content: DRAFT_SYSTEM_PROMPT },
     { role: 'user', content: sections.join('\n\n') },
   ];
-}
-
-function requireChapterOutlineItem(view: InjectionView): { title: string; refId: number | null } {
-  const item = view.layers
-    .flatMap((layer) => layer.items)
-    .find((item) => item.refType === 'chapter-outline');
-  if (!item) throw new Error('注入视图缺少章纲条目（buildInjectionView 契约被破坏）');
-  return { title: item.title, refId: item.refId };
-}
-
-/** 阶段失败统一落盘后抛出：路由未配置原样上抛（API 层 409），其余包装为阶段错误（502） */
-function failRun(
-  db: DB,
-  bookId: number,
-  idx: number,
-  attempts: number,
-  stage: PipelineStage,
-  cause: unknown
-): never {
-  const message = cause instanceof Error ? cause.message : String(cause);
-  advanceRun(db, bookId, idx, { stage, status: 'failed', attempts, error: message });
-  if (cause instanceof PackingRangeError) throw cause;
-  if (cause instanceof RouteNotConfiguredError) throw cause;
-  throw new PipelineStageError(stage, `${stage} 阶段失败：${message}`);
 }

@@ -331,4 +331,68 @@ export const MIGRATIONS: readonly string[] = [
     UNIQUE (book_id, idx)
   );
   `,
+
+  // v10：闭环 verify/fix（T11）——重建 pipeline_runs 扩阶段与状态机，新增指标表与挂起队列表。
+  // stage 增 verify/fix；status 增 suspended（fix 轮次用尽或语义冲突挂起待人工裁决）；
+  // 沿袭 v5 的表重建手法（SQLite 不能改 CHECK），旧行原样搬入。
+  // chapter_metrics 按（书，章号）唯一：每次 verify 完成 upsert，人工编辑正文也重算（纯检测）。
+  // pipeline_suspensions：挂起项，round 记录创建时的 fix 轮次（闸门只看当前轮）。
+  `
+  CREATE TABLE pipeline_runs_v10 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'prepare' CHECK (stage IN ('prepare', 'draft', 'verify', 'fix', 'commit', 'done')),
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed', 'suspended')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    prepared_view TEXT,
+    draft_content TEXT,
+    fix_rounds INTEGER NOT NULL DEFAULT 0,
+    detection_report TEXT,
+    semantic_report TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (book_id, idx)
+  );
+
+  INSERT INTO pipeline_runs_v10
+    (id, book_id, idx, stage, status, attempts, error, prepared_view, draft_content, fix_rounds, detection_report, semantic_report, created_at, updated_at)
+  SELECT id, book_id, idx, stage, status, attempts, error, prepared_view, draft_content, 0, NULL, NULL, created_at, updated_at
+  FROM pipeline_runs;
+
+  DROP TABLE pipeline_runs;
+  ALTER TABLE pipeline_runs_v10 RENAME TO pipeline_runs;
+
+  CREATE TABLE chapter_metrics (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    ai_score REAL NOT NULL,
+    confidence REAL NOT NULL,
+    adjusted_score REAL NOT NULL,
+    word_count INTEGER NOT NULL,
+    metrics TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (book_id, idx)
+  );
+
+  CREATE TABLE pipeline_suspensions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    source TEXT NOT NULL CHECK (source IN ('detection', 'semantic')),
+    title TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    detail TEXT NOT NULL DEFAULT '{}',
+    round INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'resolved')),
+    resolution TEXT CHECK (resolution IN ('rewrite', 'ignore', 'fact', 'auto')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_pipeline_suspensions_book ON pipeline_suspensions(book_id, idx, status);
+  `,
 ];
