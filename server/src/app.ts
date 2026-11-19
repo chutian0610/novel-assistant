@@ -6,6 +6,7 @@ import { settingsRoutes } from './api/settings';
 import { materialsRoutes } from './api/materials';
 import { booksRoutes } from './api/books';
 import { factsRoutes } from './api/facts';
+import { detectorsRoutes } from './api/detectors';
 import { outlinesRoutes } from './api/outlines';
 import { packingRoutes } from './api/packing';
 import { referencesRoutes } from './api/references';
@@ -27,6 +28,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', booksRoutes(deps));
   app.route('/api', outlinesRoutes(deps));
   app.route('/api', factsRoutes(deps));
+  app.route('/api', detectorsRoutes(deps));
   app.route('/api', packingRoutes(deps));
   app.route('/api', referencesRoutes(deps));
   app.notFound((c) => c.json({ error: '接口不存在' }, 404));

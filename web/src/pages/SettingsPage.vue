@@ -4,6 +4,7 @@ import { api, errorMessage } from '../api';
 import type { Provider, TaskRoute } from '../types';
 import ProviderSection from '../components/ProviderSection.vue';
 import RouteSection from '../components/RouteSection.vue';
+import DetectorConfigSection from '../components/DetectorConfigSection.vue';
 
 const providers = ref<Provider[]>([]);
 const routes = ref<TaskRoute[]>([]);
@@ -50,6 +51,7 @@ onMounted(async () => {
     <template v-else>
       <ProviderSection :providers="providers" @changed="onSettingsChanged" />
       <RouteSection :providers="providers" :routes="routes" @changed="onSettingsChanged" />
+      <DetectorConfigSection />
     </template>
   </div>
 </template>

@@ -260,4 +260,27 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_foreshadows_book ON foreshadows(book_id);
   `,
+
+  // v8：检测阈值配置（T7）——键值表存 8 维检测器的阈值（键白名单由应用层 DEFAULT_DETECTOR_CONFIG
+  // 的键集把守，故不加 CHECK 以便日后追加键；种子行即 spec 初始值，均可改）
+  `
+  CREATE TABLE detector_configs (
+    key TEXT PRIMARY KEY,
+    value REAL NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  INSERT OR IGNORE INTO detector_configs (key, value) VALUES
+    ('lexicalDiversityThreshold', 0.55),
+    ('sentenceLengthCVThreshold', 0.35),
+    ('trigramRepetitionThreshold', 0.02),
+    ('templatePhrasePerKiloWordThreshold', 2),
+    ('punctuationCVMin', 0.3),
+    ('punctuationCVMax', 0.65),
+    ('dialogueRatioMin', 0.05),
+    ('dialogueRatioMax', 0.65),
+    ('emotionDensityMin', 0.003),
+    ('emotionDensityMax', 0.06),
+    ('semanticSmoothnessCVThreshold', 0.3);
+  `,
 ];
