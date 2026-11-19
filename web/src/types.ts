@@ -311,3 +311,42 @@ export interface ExtractRunResult {
   failed: { chapterId: number; chapterTitle: string; error: string }[];
   remaining: number;
 }
+
+// ---- 注入视图（与 server/src/packing/pack.ts 为镜像副本，增删字段须两处同步） ----
+
+export type PackingLayerKey = 'contract' | 'outline' | 'characters' | 'relevance';
+
+export interface PackingItem {
+  refType: 'book-contract' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
+  refId: number | null;
+  title: string;
+  /** 注入文本（与后续 prompt 装填共用） */
+  text: string;
+  tokens: number;
+  /** 出处章节号；null 表示该条目无章节维度 */
+  sourceChapter: number | null;
+  /** 相关度名次（1 = 最相关）；仅相关性层条目携带 */
+  rank?: number;
+}
+
+export interface PackingLayer {
+  key: PackingLayerKey;
+  label: string;
+  kind: 'must' | 'relevance';
+  items: PackingItem[];
+  tokens: number;
+  /** 相关性层是否因预算截断 */
+  truncated: boolean;
+  /** 因预算放下的候选条数 */
+  droppedCount: number;
+}
+
+export interface InjectionView {
+  bookId: number;
+  chapter: number;
+  budgetTokens: number;
+  usedTokens: number;
+  /** 必带层不可截断，预算小于必带层时超额为 true */
+  overBudget: boolean;
+  layers: PackingLayer[];
+}

@@ -85,6 +85,7 @@ onMounted(load);
           <div class="outline-actions">
             <RouterLink :to="`/books/${book.id}/outline`" class="btn">两级大纲</RouterLink>
             <RouterLink :to="`/books/${book.id}/facts`" class="btn">事实面板</RouterLink>
+            <RouterLink :to="`/books/${book.id}/packing`" class="btn">注入视图</RouterLink>
             <button class="btn" type="button" @click="editorVisible = true">编辑书契约</button>
           </div>
         </div>

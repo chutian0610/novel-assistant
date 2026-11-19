@@ -25,6 +25,38 @@ export function buildMatchQuery(input: string): string | null {
   return tokens.map((token) => `"${token}"`).join(' ');
 }
 
+/**
+ * 装填检索（T9）的召回查询，OR 连接。注入视图要「宁可多召回，交给 BM25 排序与预算截断」，
+ * 与 buildMatchQuery 的 AND 精确搜索语义不同。
+ *
+ * 词元分三档处理：多字词直接作 OR 项；连续单字串（词典外专名，如「玄铁令」被切成 玄/铁/令）
+ * 合成 FTS5 短语查询，按索引中的相邻字序列命中；孤立单字（的/大/在等）丢弃降噪。
+ * 全部为空时返回 null，调用方应视为空结果。
+ */
+export function buildRecallQuery(input: string): string | null {
+  const terms: string[] = [];
+  let charRun: string[] = [];
+  const flushRun = () => {
+    if (charRun.length >= 2) terms.push(charRun.map((ch) => `"${ch}"`).join(' '));
+    charRun = [];
+  };
+  for (const part of segmenter.segment(input)) {
+    if (!part.isWordLike) {
+      flushRun(); // 标点/空白打断字序列
+      continue;
+    }
+    if (part.segment.length >= 2) {
+      flushRun();
+      terms.push(`"${part.segment}"`);
+    } else {
+      charRun.push(part.segment);
+    }
+  }
+  flushRun();
+  if (terms.length === 0) return null;
+  return [...new Set(terms)].join(' OR ');
+}
+
 /** 拼接素材各字段为索引文本：标题、正文、结构化字段、标签、溯源 */
 export function buildSearchText(parts: readonly (string | undefined | null)[]): string {
   return segmentText(parts.filter((part): part is string => Boolean(part && part.trim())).join(' '));
