@@ -298,3 +298,81 @@ export async function getOutlineTree(
 export function outlineResult(options: { title: string; summary: string }[]): ChatResult {
   return { content: JSON.stringify({ options }), model: 'fake-outline' };
 }
+
+// ---- 事实四表（T8）----
+
+export type TestCharacterState = import('../src/facts/store').CharacterStateRecord;
+export type TestCharacterRelation = import('../src/facts/store').CharacterRelationRecord;
+export type TestTimelineEvent = import('../src/facts/store').TimelineEventRecord;
+export type TestForeshadow = import('../src/facts/store').ForeshadowRecord;
+
+/** 通过 API 预置一条角色运行时 */
+export async function seedCharacterState(
+  request: TestEnv['request'],
+  bookId: number,
+  overrides: Partial<Pick<TestCharacterState, 'name' | 'chapter' | 'category' | 'content' | 'evidence'>> = {}
+): Promise<TestCharacterState> {
+  const res = await request.post(`/api/books/${bookId}/facts/characters`, {
+    name: '陆沉舟',
+    chapter: 3,
+    category: 'injury',
+    content: '左臂经脉尽断，靠玄天宗秘药勉强续上。',
+    evidence: '「你这条左臂，三个月内是握不住剑了。」',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置角色运行时失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 通过 API 预置一条人物关系（有向边） */
+export async function seedRelation(
+  request: TestEnv['request'],
+  bookId: number,
+  overrides: Partial<Pick<TestCharacterRelation, 'fromName' | 'toName' | 'relation' | 'chapter' | 'evidence'>> = {}
+): Promise<TestCharacterRelation> {
+  const res = await request.post(`/api/books/${bookId}/facts/relations`, {
+    fromName: '陆沉舟',
+    toName: '玄阳真人',
+    relation: '师徒',
+    chapter: 3,
+    evidence: '「拜师礼毕，你便是我玄阳一脉的关门弟子。」',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置人物关系失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 通过 API 预置一条时间轴事件 */
+export async function seedTimelineEvent(
+  request: TestEnv['request'],
+  bookId: number,
+  overrides: Partial<Pick<TestTimelineEvent, 'chapter' | 'title' | 'content' | 'evidence'>> = {}
+): Promise<TestTimelineEvent> {
+  const res = await request.post(`/api/books/${bookId}/facts/timeline`, {
+    chapter: 3,
+    title: '测灵大典',
+    content: '陆沉舟测出废灵根，当夜觉醒神秘功法。',
+    evidence: '「废灵根。」执事扔下玉牌，转身就走。',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置时间轴事件失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 通过 API 预置一条伏笔（默认 planted） */
+export async function seedForeshadow(
+  request: TestEnv['request'],
+  bookId: number,
+  overrides: Partial<Pick<TestForeshadow, 'title' | 'content' | 'plantedChapter' | 'targetChapter' | 'evidence'>> = {}
+): Promise<TestForeshadow> {
+  const res = await request.post(`/api/books/${bookId}/facts/foreshadows`, {
+    title: '残玉中的低语',
+    content: '觉醒的神秘功法似乎与残玉中的低语同源。',
+    plantedChapter: 1,
+    targetChapter: 12,
+    evidence: '玉佩贴肉的地方，忽然烫了一下。',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置伏笔失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}

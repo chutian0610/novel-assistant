@@ -17,7 +17,7 @@ import {
   type PayloadFieldRule,
 } from '../materials/store';
 import { HttpError } from './errors';
-import { parseBody, parseId, parsePaginationInt, readJson } from './validate';
+import { parseBody, parseId, parseQueryInt, readJson } from './validate';
 
 /** 领域字段规则 → 单字段 zod 校验（required 即非空，错误消息取字段标签） */
 function fieldSchema(rule: PayloadFieldRule): z.ZodString {
@@ -103,8 +103,8 @@ export function materialsRoutes(deps: { db: DB }) {
       type: rawType === '' || rawType === undefined ? undefined : (rawType as MaterialType),
       tag: c.req.query('tag') || undefined,
       q: c.req.query('q') || undefined,
-      limit: parsePaginationInt(c.req.query('limit'), 'limit', 1, 200, 50),
-      offset: parsePaginationInt(c.req.query('offset'), 'offset', 0, Number.MAX_SAFE_INTEGER, 0),
+      limit: parseQueryInt(c.req.query('limit'), 'limit', 1, 200, 50),
+      offset: parseQueryInt(c.req.query('offset'), 'offset', 0, Number.MAX_SAFE_INTEGER, 0),
     };
     const { items, total } = listMaterials(db, filter);
     return c.json({ items: items.map(toMaterialJson), total });

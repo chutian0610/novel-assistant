@@ -199,4 +199,65 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_chapter_outlines_volume ON chapter_outlines(volume_id);
   `,
+
+  // v7：事实四表（T8，ADR-0002）——角色运行时/人物关系/时间轴/伏笔账本，全部挂书，
+  // 每条事实带来源章（chapter）+ 原文证据（evidence）；删除书级联清理。
+  // V1 全部手动 CRUD，章节落稿的自动回灌在后续工单接入
+  `
+  CREATE TABLE character_states (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
+    chapter INTEGER NOT NULL,
+    category TEXT NOT NULL CHECK (category IN ('injury', 'secret', 'possession', 'realm', 'other')),
+    content TEXT NOT NULL,
+    evidence TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_character_states_book ON character_states(book_id);
+
+  CREATE TABLE character_relations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    from_name TEXT NOT NULL,
+    to_name TEXT NOT NULL,
+    relation TEXT NOT NULL,
+    chapter INTEGER NOT NULL,
+    evidence TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_character_relations_book ON character_relations(book_id);
+
+  CREATE TABLE timeline_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    chapter INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    evidence TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_timeline_events_book ON timeline_events(book_id);
+
+  CREATE TABLE foreshadows (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    content TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'planted' CHECK (status IN ('planted', 'progressing', 'resolved', 'abandoned')),
+    planted_chapter INTEGER NOT NULL,
+    target_chapter INTEGER NOT NULL,
+    evidence TEXT NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_foreshadows_book ON foreshadows(book_id);
+  `,
 ];

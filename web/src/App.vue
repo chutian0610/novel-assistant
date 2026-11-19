@@ -2,7 +2,7 @@
 import { RouterLink } from 'vue-router';
 
 // 占位导航：其余页面由后续工单逐个接入
-const plannedItems = ['写作台', '事实面板', '检测报告'];
+const plannedItems = ['写作台', '检测报告'];
 </script>
 
 <template>

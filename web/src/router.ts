@@ -1,6 +1,7 @@
 import { createRouter, createWebHashHistory } from 'vue-router';
 import ShelfPage from './pages/ShelfPage.vue';
 import BookDetailPage from './pages/BookDetailPage.vue';
+import FactsPage from './pages/FactsPage.vue';
 import OutlinePage from './pages/OutlinePage.vue';
 import ReferencesPage from './pages/ReferencesPage.vue';
 import ReferenceDetailPage from './pages/ReferenceDetailPage.vue';
@@ -15,6 +16,7 @@ export const router = createRouter({
     { path: '/books', component: ShelfPage },
     { path: '/books/:id', component: BookDetailPage },
     { path: '/books/:id/outline', component: OutlinePage },
+    { path: '/books/:id/facts', component: FactsPage },
     { path: '/references', component: ReferencesPage },
     { path: '/references/:id', component: ReferenceDetailPage },
     { path: '/materials', component: MaterialsPage },
