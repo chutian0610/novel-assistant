@@ -350,3 +350,79 @@ export interface InjectionView {
   overBudget: boolean;
   layers: PackingLayer[];
 }
+
+// ---- 检测器（与 server/src/detectors/metrics.ts 为镜像副本，增删字段须两处同步） ----
+
+export type MetricKey =
+  | 'trigramRepetition'
+  | 'sentenceLengthCV'
+  | 'lexicalDiversity'
+  | 'templatePhrase'
+  | 'punctuationCV'
+  | 'dialogueRatio'
+  | 'emotionDensity'
+  | 'semanticSmoothness';
+
+export const METRIC_KEY_LABELS: Record<MetricKey, string> = {
+  trigramRepetition: '3-gram 重复',
+  sentenceLengthCV: '句长波动',
+  lexicalDiversity: '词汇多样性',
+  templatePhrase: '模板套话',
+  punctuationCV: '标点节奏',
+  dialogueRatio: '对白比例',
+  emotionDensity: '情绪密度',
+  semanticSmoothness: '语义平滑',
+};
+
+/** 加权权重（与 server 同源固化；权重序：重复>句长>词汇>模板>标点>对白>情绪>语义） */
+export const METRIC_WEIGHTS: Record<MetricKey, number> = {
+  trigramRepetition: 0.25,
+  sentenceLengthCV: 0.2,
+  lexicalDiversity: 0.15,
+  templatePhrase: 0.12,
+  punctuationCV: 0.1,
+  dialogueRatio: 0.08,
+  emotionDensity: 0.06,
+  semanticSmoothness: 0.04,
+};
+
+export interface DetectorConfig {
+  lexicalDiversityThreshold: number;
+  sentenceLengthCVThreshold: number;
+  trigramRepetitionThreshold: number;
+  templatePhrasePerKiloWordThreshold: number;
+  punctuationCVMin: number;
+  punctuationCVMax: number;
+  dialogueRatioMin: number;
+  dialogueRatioMax: number;
+  emotionDensityMin: number;
+  emotionDensityMax: number;
+  semanticSmoothnessCVThreshold: number;
+}
+
+export interface MetricResult {
+  key: MetricKey;
+  /** 原始指标值 */
+  value: number;
+  threshold: number | { min: number; max: number };
+  pass: boolean;
+  /** 归一化问题分 0~1 */
+  score: number;
+  /** 问题/证据句索引（仅句级证据维度） */
+  hits: number[];
+  /** 样本不足无法计算，不计入评分 */
+  skipped?: boolean;
+}
+
+export interface DetectionReport {
+  sentences: string[];
+  metrics: MetricResult[];
+  /** 加权 AI 倾向分 0~100（未降权） */
+  aiScore: number;
+  /** 短文本降权系数 0~1 */
+  confidence: number;
+  /** aiScore × confidence */
+  adjustedScore: number;
+  wordCount: number;
+  insufficient: boolean;
+}

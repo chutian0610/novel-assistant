@@ -7,6 +7,7 @@ import OutlinePage from './pages/OutlinePage.vue';
 import ReferencesPage from './pages/ReferencesPage.vue';
 import ReferenceDetailPage from './pages/ReferenceDetailPage.vue';
 import MaterialsPage from './pages/MaterialsPage.vue';
+import DetectorsPage from './pages/DetectorsPage.vue';
 import SettingsPage from './pages/SettingsPage.vue';
 
 // hash 路由：生产模式由后端直接静态托管，无需 SPA fallback
@@ -22,6 +23,7 @@ export const router = createRouter({
     { path: '/references', component: ReferencesPage },
     { path: '/references/:id', component: ReferenceDetailPage },
     { path: '/materials', component: MaterialsPage },
+    { path: '/detectors', component: DetectorsPage },
     { path: '/settings', component: SettingsPage },
     { path: '/:pathMatch(.*)*', redirect: '/books' },
   ],
