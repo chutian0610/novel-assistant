@@ -198,6 +198,8 @@ h3 {
   font: inherit;
   cursor: pointer;
   white-space: nowrap;
+  text-decoration: none;
+  display: inline-block;
 }
 .btn:hover:not(:disabled) {
   border-color: var(--accent);
@@ -707,4 +709,89 @@ h3 {
 }
 .archived-card {
   opacity: 0.72;
+}
+
+/* ---- 两级大纲 ---- */
+.outline-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.outline-chapter-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.outline-chapter {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.outline-chapter-locked {
+  background: #fbfbf7;
+}
+.outline-chapter-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.outline-chapter-title {
+  font-size: 15px;
+  flex: 1;
+  min-width: 160px;
+}
+.outline-chapter-actions {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  flex-shrink: 0;
+}
+.outline-chapter-summary {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+}
+.badge-status-draft {
+  background: #f0f1f3;
+  color: var(--muted);
+}
+.badge-status-approved {
+  background: #eef3fe;
+  color: var(--accent);
+}
+.badge-status-locked {
+  background: var(--warn-bg);
+  color: var(--warn-text);
+}
+.expansion-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 14px;
+}
+.expansion-option {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+}
+.expansion-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.expansion-index {
+  font-size: 12px;
+  color: var(--accent);
+  background: #eef3fe;
+  border-radius: 999px;
+  padding: 1px 10px;
+  flex-shrink: 0;
+}
+.expansion-title {
+  flex: 1;
+  min-width: 0;
+}
+.expansion-summary {
+  margin: 8px 0 0;
+  white-space: pre-wrap;
 }

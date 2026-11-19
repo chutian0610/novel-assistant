@@ -82,7 +82,10 @@ onMounted(load);
       <section class="panel">
         <div class="panel-head">
           <h2>书契约</h2>
-          <button class="btn" type="button" @click="editorVisible = true">编辑书契约</button>
+          <div class="outline-actions">
+            <RouterLink :to="`/books/${book.id}/outline`" class="btn">两级大纲</RouterLink>
+            <button class="btn" type="button" @click="editorVisible = true">编辑书契约</button>
+          </div>
         </div>
         <div class="contract-grid">
           <div class="contract-item">

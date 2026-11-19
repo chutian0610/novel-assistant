@@ -171,4 +171,32 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_extraction_items_ref_status ON extraction_items(reference_id, status);
   `,
+
+  // v6：两级大纲（T6）——卷纲挂书下、章纲挂卷下；章纲带状态机
+  // （draft→approved→locked，locked 仅可显式解锁回 approved）。删除卷级联删章纲，
+  // 删除书级联删全部大纲；含锁定章纲的卷由应用层拒绝删除
+  `
+  CREATE TABLE volumes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_volumes_book ON volumes(book_id);
+
+  CREATE TABLE chapter_outlines (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    volume_id INTEGER NOT NULL REFERENCES volumes(id) ON DELETE CASCADE,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'draft' CHECK (status IN ('draft', 'approved', 'locked')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_chapter_outlines_volume ON chapter_outlines(volume_id);
+  `,
 ];

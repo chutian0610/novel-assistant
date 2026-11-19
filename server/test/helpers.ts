@@ -244,3 +244,57 @@ export async function extractQueue(
   if (res.status !== 200) throw new Error(`获取抽取队列失败：${res.status} ${JSON.stringify(res.body)}`);
   return res.body;
 }
+
+// ---- 两级大纲（T6）----
+
+/** 卷纲 JSON 形状与 server 的 VolumeRecord 同构 */
+export type TestVolume = import('../src/outlines/store').VolumeRecord;
+
+/** 章纲 JSON 形状与 server 的 ChapterOutlineRecord 同构 */
+export type TestChapterOutline = import('../src/outlines/store').ChapterOutlineRecord;
+
+/** 通过 API 预置一卷卷纲 */
+export async function seedVolume(
+  request: TestEnv['request'],
+  bookId: number,
+  overrides: Partial<Pick<TestVolume, 'title' | 'summary'>> = {}
+): Promise<TestVolume> {
+  const res = await request.post(`/api/books/${bookId}/outlines/volumes`, {
+    title: '第一卷·宗门试炼',
+    summary: '主角入门，黄金三章小高潮，卷末大比夺魁。',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置卷纲失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 通过 API 在卷下预置一条章纲（默认草稿态） */
+export async function seedChapterOutline(
+  request: TestEnv['request'],
+  bookId: number,
+  volumeId: number,
+  overrides: Partial<Pick<TestChapterOutline, 'title' | 'summary'>> = {}
+): Promise<TestChapterOutline> {
+  const res = await request.post(`/api/books/${bookId}/outlines/volumes/${volumeId}/chapters`, {
+    title: '第1章 废柴觉醒',
+    summary: '测灵仪前受辱，当夜觉醒神秘功法。',
+    ...overrides,
+  });
+  if (res.status !== 201) throw new Error(`预置章纲失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 读取某书的完整大纲树（卷 + 其下章纲） */
+export async function getOutlineTree(
+  request: TestEnv['request'],
+  bookId: number
+): Promise<{ volumes: (TestVolume & { chapters: TestChapterOutline[] })[] }> {
+  const res = await request.get(`/api/books/${bookId}/outlines`);
+  if (res.status !== 200) throw new Error(`获取大纲树失败：${res.status} ${JSON.stringify(res.body)}`);
+  return res.body;
+}
+
+/** 把展开方案包装成 FakeLLM 的脚本化响应 */
+export function outlineResult(options: { title: string; summary: string }[]): ChatResult {
+  return { content: JSON.stringify({ options }), model: 'fake-outline' };
+}

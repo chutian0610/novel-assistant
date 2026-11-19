@@ -126,8 +126,8 @@ export function getBookMaterial(db: DB, bookId: number, materialId: number): Boo
 
 // ---------- 书内素材引用：写入 ----------
 
-/** 书内素材变动视为书的活动：刷新 books.updated_at，书架「更新于」与排序随之反映 */
-function touchBook(db: DB, bookId: number): void {
+/** 书内素材/大纲等变动视为书的活动：刷新 books.updated_at，书架「更新于」与排序随之反映（各 store 共享） */
+export function touchBook(db: DB, bookId: number): void {
   db.prepare(`UPDATE books SET updated_at = ${NOW} WHERE id = ?`).run(bookId);
 }
 
