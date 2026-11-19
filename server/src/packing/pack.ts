@@ -83,7 +83,7 @@ const MATERIAL_TYPE_LABELS: Record<MaterialType, string> = {
   skeleton: '书骨骼',
 };
 
-interface FlatChapter {
+export interface FlatChapter {
   volumeTitle: string;
   volumeSummary: string;
   chapterOutlineId: number;
@@ -255,9 +255,9 @@ function layer(key: PackingLayerKey, label: string, kind: 'must' | 'relevance', 
 
 /**
  * 章号 → 章纲：章纲无章号字段（T6 schema），按大纲树顺序（卷序 + 卷内序）取第 N 条。
- * 该顺序即 T10 管线建章时的自然章序。
+ * 该顺序即 T10 管线建章时的自然章序。导出供管线 prepare 阶段复用同一映射规则。
  */
-function locateChapterOutline(db: DB, bookId: number, chapter: number): FlatChapter {
+export function locateChapterOutline(db: DB, bookId: number, chapter: number): FlatChapter {
   const tree = getOutlineTree(db, bookId);
   const flat: FlatChapter[] = tree.volumes.flatMap((volume) =>
     volume.chapters.map((outline) => ({
