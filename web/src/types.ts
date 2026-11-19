@@ -426,3 +426,99 @@ export interface DetectionReport {
   wordCount: number;
   insufficient: boolean;
 }
+
+// ---- 章节管线与写作台（与 server/src/pipeline/store.ts 为镜像副本，增删字段须两处同步） ----
+
+// 管线阶段：stage 记录「下一个待执行阶段」，done 表示全部完成（verify/fix 为后续工单）
+export type PipelineStage = 'prepare' | 'draft' | 'commit' | 'done';
+
+export const PIPELINE_STAGE_LABELS: Record<PipelineStage, string> = {
+  prepare: '准备',
+  draft: '草稿',
+  commit: '落盘',
+  done: '完成',
+};
+
+export type PipelineStatus = 'running' | 'done' | 'failed';
+
+export const PIPELINE_STATUS_LABELS: Record<PipelineStatus, string> = {
+  running: '进行中',
+  done: '已完成',
+  failed: '失败',
+};
+
+export interface PipelineRun {
+  bookId: number;
+  /** 章号（1 起，大纲树顺序） */
+  idx: number;
+  stage: PipelineStage;
+  status: PipelineStatus;
+  /** 已执行的阶段步数（含失败尝试；断点续跑累计） */
+  attempts: number;
+  error: string | null;
+  /** prepare 产物：本次生成实际装填的注入视图 */
+  preparedView: InjectionView | null;
+  /** draft 产物：正文草稿 */
+  draftContent: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Chapter {
+  bookId: number;
+  idx: number;
+  /** 生成时章纲标题的快照 */
+  title: string;
+  outlineId: number | null;
+  content: string;
+  /** 滚动摘要（content 的派生物，随正文写入同步重算） */
+  summary: string;
+  charCount: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+/** 快照来源：管线 commit / 人工编辑 / 快照回退 */
+export type SnapshotSource = 'pipeline' | 'edit' | 'revert';
+
+export const SNAPSHOT_SOURCE_LABELS: Record<SnapshotSource, string> = {
+  pipeline: '管线生成',
+  edit: '人工编辑',
+  revert: '快照回退',
+};
+
+export interface ChapterSnapshot {
+  id: number;
+  content: string;
+  summary: string;
+  source: SnapshotSource;
+  createdAt: string;
+}
+
+export interface ChapterDetail {
+  chapter: Chapter;
+  run: PipelineRun | null;
+  snapshots: ChapterSnapshot[];
+}
+
+export interface ChapterListItem {
+  idx: number;
+  title: string;
+  outlineId: number | null;
+  summary: string;
+  charCount: number;
+  createdAt: string;
+  updatedAt: string;
+  run: Pick<PipelineRun, 'stage' | 'status' | 'attempts' | 'error'> | null;
+}
+
+export interface ChapterListResponse {
+  items: ChapterListItem[];
+  total: number;
+}
+
+export interface GenerateResult {
+  chapter: Chapter;
+  run: PipelineRun;
+  snapshots: ChapterSnapshot[];
+}

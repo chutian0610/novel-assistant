@@ -5,6 +5,7 @@ import { healthRoutes } from './api/health';
 import { settingsRoutes } from './api/settings';
 import { materialsRoutes } from './api/materials';
 import { booksRoutes } from './api/books';
+import { chaptersRoutes } from './api/chapters';
 import { factsRoutes } from './api/facts';
 import { detectorsRoutes } from './api/detectors';
 import { outlinesRoutes } from './api/outlines';
@@ -26,6 +27,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api/settings', settingsRoutes(deps));
   app.route('/api', materialsRoutes(deps));
   app.route('/api', booksRoutes(deps));
+  app.route('/api', chaptersRoutes(deps));
   app.route('/api', outlinesRoutes(deps));
   app.route('/api', factsRoutes(deps));
   app.route('/api', detectorsRoutes(deps));

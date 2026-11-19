@@ -83,6 +83,7 @@ onMounted(load);
         <div class="panel-head">
           <h2>书契约</h2>
           <div class="outline-actions">
+            <RouterLink :to="`/books/${book.id}/writing`" class="btn">写作台</RouterLink>
             <RouterLink :to="`/books/${book.id}/outline`" class="btn">两级大纲</RouterLink>
             <RouterLink :to="`/books/${book.id}/facts`" class="btn">事实面板</RouterLink>
             <RouterLink :to="`/books/${book.id}/packing`" class="btn">注入视图</RouterLink>

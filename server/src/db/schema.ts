@@ -283,4 +283,52 @@ export const MIGRATIONS: readonly string[] = [
     ('emotionDensityMax', 0.06),
     ('semanticSmoothnessCVThreshold', 0.3);
   `,
+
+  // v9：章节管线骨架（T10）——章节实例 + 版本快照 + 管线状态表。
+  // chapters 按（书，章号）唯一，章号即大纲树顺序（packing 的章纲映射规则）；
+  // outline_id 记录生成时命中的章纲（章纲被删时置空，标题已快照进 chapters.title）。
+  // pipeline_runs 按（书，章号）唯一：阶段推进与 prepare/draft 产物落盘，进程中断后从断点续跑、
+  // 不重复调用 LLM；commit 阶段在单事务内写 chapters + chapter_snapshots + 本表。
+  `
+  CREATE TABLE chapters (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    title TEXT NOT NULL,
+    outline_id INTEGER REFERENCES chapter_outlines(id) ON DELETE SET NULL,
+    content TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (book_id, idx)
+  );
+
+  CREATE INDEX idx_chapters_book ON chapters(book_id);
+
+  CREATE TABLE chapter_snapshots (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    chapter_id INTEGER NOT NULL REFERENCES chapters(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    summary TEXT NOT NULL DEFAULT '',
+    source TEXT NOT NULL CHECK (source IN ('pipeline', 'edit', 'revert')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_chapter_snapshots_chapter ON chapter_snapshots(chapter_id);
+
+  CREATE TABLE pipeline_runs (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    stage TEXT NOT NULL DEFAULT 'prepare' CHECK (stage IN ('prepare', 'draft', 'commit', 'done')),
+    status TEXT NOT NULL DEFAULT 'running' CHECK (status IN ('running', 'done', 'failed')),
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT,
+    prepared_view TEXT,
+    draft_content TEXT,
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (book_id, idx)
+  );
+  `,
 ];
