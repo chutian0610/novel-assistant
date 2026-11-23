@@ -9,6 +9,8 @@ import { extractFacts } from '../facts/extract-facts';
 import { RouteNotConfiguredError } from '../llm/routed';
 import type { LLMProvider } from '../llm/types';
 import { PackingRangeError } from '../packing/pack';
+import { getPipelineConfig } from '../pipeline/config';
+import { getPipelineQueue, runBatch } from '../pipeline/batch';
 import { deriveSummary, PipelinePreconditionError, runChapterPipeline } from '../pipeline/run';
 import { PipelineStageError, settleFactSync } from '../pipeline/verify';
 import {
@@ -24,7 +26,8 @@ import {
   PIPELINE_STATUS_LABELS,
   updateChapterContent,
   upsertChapterMetrics,
-  type PipelineRunRecord,
+  toCompactRun,
+  type CompactRun,
 } from '../pipeline/store';
 import { HttpError } from './errors';
 import { parseBody, parseId, readJson } from './validate';
@@ -45,7 +48,7 @@ function mapPipelineError(cause: unknown): unknown {
   return cause;
 }
 
-/** 章节列表项：章节 + 运行状态摘要（不带注入视图等重负载） */
+/** 章节列表项：章节 + 运行状态摘要（CompactRun 统一投影，不带注入视图等重负载） */
 export interface ChapterListItem {
   idx: number;
   title: string;
@@ -54,7 +57,7 @@ export interface ChapterListItem {
   charCount: number;
   createdAt: string;
   updatedAt: string;
-  run: Pick<PipelineRunRecord, 'stage' | 'status' | 'attempts' | 'error'> | null;
+  run: CompactRun | null;
 }
 
 /**
@@ -80,7 +83,7 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
         charCount: chapter.charCount,
         createdAt: chapter.createdAt,
         updatedAt: chapter.updatedAt,
-        run: run ? { stage: run.stage, status: run.status, attempts: run.attempts, error: run.error } : null,
+        run: run ? toCompactRun(run) : null,
       };
     });
     return c.json({ items, total: items.length });
@@ -133,6 +136,29 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       metrics: detection.metrics,
     });
     return c.json(getChapter(db, bookId, idx));
+  });
+
+  // ---------- 全自动连跑与批量队列视图（T13，ADR-0001 全自动预设） ----------
+
+  // 连跑：协作预设拒绝（逐章审阅语义）；从第一个未完成章连续生成至上限后暂停待审
+  app.post('/books/:id/chapters/batch-generate', async (c) => {
+    const bookId = parseId(c.req.param('id'));
+    requireBook(db, bookId, c.req.param('id'));
+    const config = getPipelineConfig(db);
+    if (config.mode !== 'auto') {
+      throw new HttpError(
+        409,
+        '当前为协作预设（逐章审阅）：生成一章审一章，连跑仅在全自动预设下开放；可在设置中切换预设'
+      );
+    }
+    return c.json(await runBatch(db, llm, bookId, config));
+  });
+
+  // 批量队列视图：大纲树全位置 ⋈ 运行状态（含挂起/失败等未落稿断点），实时可见
+  app.get('/books/:id/pipeline-queue', (c) => {
+    const bookId = parseId(c.req.param('id'));
+    requireBook(db, bookId, c.req.param('id'));
+    return c.json({ items: getPipelineQueue(db, bookId) });
   });
 
   // 手动事实回灌（T12）：回灌失败后的重试入口；仅对已落稿章节开放。

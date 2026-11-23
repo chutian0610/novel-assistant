@@ -634,3 +634,69 @@ export interface ChapterMetricsResponse {
   items: ChapterMetrics[];
   total: number;
 }
+
+// ---- 介入点预设与批量连跑（与 server/src/pipeline/config.ts、batch.ts 为镜像副本，增删字段须两处同步） ----
+
+// 介入点预设（ADR-0001 两预设）：协作 = 逐章审阅；全自动 = 连跑至上限暂停待审
+export const INTERVENTION_MODES = ['collaborative', 'auto'] as const;
+export type InterventionMode = (typeof INTERVENTION_MODES)[number];
+
+export const INTERVENTION_MODE_LABELS: Record<InterventionMode, string> = {
+  collaborative: '协作',
+  auto: '全自动',
+};
+
+export interface PipelineSettings {
+  mode: InterventionMode;
+  autoRunLimit: number;
+}
+
+export type BatchStopReason = 'limit' | 'suspended' | 'error' | 'precondition' | 'none';
+
+export const BATCH_STOP_REASON_LABELS: Record<BatchStopReason, string> = {
+  limit: '到达连跑上限',
+  suspended: '章节挂起待裁决',
+  error: '生成失败',
+  precondition: '章纲缺失或未批准',
+  none: '没有待生成章节',
+};
+
+/** 运行状态摘要（列表/队列等重负载场景用，不带注入视图与双报告） */
+export interface CompactRun {
+  stage: PipelineStage;
+  status: PipelineStatus;
+  attempts: number;
+  fixRounds: number;
+  error: string | null;
+  extractError: string | null;
+}
+
+export interface BatchChapterOutcome {
+  idx: number;
+  chapter: Chapter;
+  run: CompactRun;
+}
+
+export interface BatchResult {
+  completed: BatchChapterOutcome[];
+  stopped: {
+    reason: BatchStopReason;
+    /** 停止时所在章（limit/none 为 null） */
+    idx: number | null;
+    message: string;
+  };
+  /** 下一个待生成章号；无待生成章时为 null */
+  nextIdx: number | null;
+}
+
+/** 批量队列视图项：大纲树全位置 ⋈ 运行状态（含未落稿断点） */
+export interface QueueItem {
+  idx: number;
+  title: string;
+  chapter: Chapter | null;
+  run: CompactRun | null;
+}
+
+export interface QueueResponse {
+  items: QueueItem[];
+}

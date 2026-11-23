@@ -2,8 +2,28 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { api, errorMessage } from '../api';
-import type { Book, Chapter, ChapterDetail, ChapterListItem, ChapterListResponse, GenerateResult, OutlineTree, PipelineRun } from '../types';
-import { PIPELINE_STAGE_LABELS, PIPELINE_STATUS_LABELS, SNAPSHOT_SOURCE_LABELS } from '../types';
+import type {
+  BatchResult,
+  Book,
+  Chapter,
+  ChapterDetail,
+  ChapterListItem,
+  ChapterListResponse,
+  GenerateResult,
+  OutlineTree,
+  PipelineRun,
+  PipelineSettings,
+  QueueItem,
+  QueueResponse,
+} from '../types';
+import type { BatchStopReason } from '../types';
+import {
+  BATCH_STOP_REASON_LABELS,
+  INTERVENTION_MODE_LABELS,
+  PIPELINE_STAGE_LABELS,
+  PIPELINE_STATUS_LABELS,
+  SNAPSHOT_SOURCE_LABELS,
+} from '../types';
 
 const route = useRoute();
 const bookId = computed(() => Number(route.params.id));
@@ -22,6 +42,13 @@ const generateError = ref<string | null>(null);
 const actionError = ref<string | null>(null);
 const generating = ref(false);
 const saving = ref(false);
+
+// 批量连跑（T13）：预设、队列视图与连跑结果
+const pipelineSettings = ref<PipelineSettings | null>(null);
+const queueItems = ref<QueueItem[]>([]);
+const batchRunning = ref(false);
+/** 连跑停止信息（reason 标签 + 服务端 message）；null = 本次未跑或已过时 */
+const batchNotice = ref<{ reason: BatchStopReason; message: string } | null>(null);
 
 /** 单章生成入口：只列已批准/锁定的章纲（章号 = 大纲树扁平序，与管线章号映射一致） */
 const generatableChapters = computed(() => {
@@ -53,6 +80,47 @@ async function refreshList() {
   chapters.value = (await api.get<ChapterListResponse>(`/api/books/${bookId.value}/chapters`)).items;
 }
 
+async function refreshQueue() {
+  queueItems.value = (await api.get<QueueResponse>(`/api/books/${bookId.value}/pipeline-queue`)).items;
+}
+
+/** 队列项展示状态：未开始 / 阶段·状态 / 已完成 */
+function queueStatus(item: QueueItem): string {
+  if (!item.run) return '未开始';
+  if (item.run.status === 'done') return '已完成';
+  return `${PIPELINE_STATUS_LABELS[item.run.status]} · ${PIPELINE_STAGE_LABELS[item.run.stage]}`;
+}
+
+function queueStatusClass(item: QueueItem): string {
+  if (!item.run) return 'muted';
+  if (item.run.status === 'done') return 'ok-text';
+  if (item.run.status === 'failed' || item.run.status === 'suspended') return 'error-text';
+  return '';
+}
+
+/** 全自动连跑：从第一个未完成章连续生成至上限（挂起/失败即停，断点已落盘） */
+async function runBatch() {
+  if (batchRunning.value) return;
+  batchRunning.value = true;
+  generateError.value = null;
+  try {
+    const result = await api.post<BatchResult>(`/api/books/${bookId.value}/chapters/batch-generate`, {});
+    batchNotice.value = {
+      reason: result.stopped.reason,
+      message: `${BATCH_STOP_REASON_LABELS[result.stopped.reason]}：${result.stopped.message}`,
+    };
+    await refreshList();
+    await refreshQueue();
+    const last = result.completed[result.completed.length - 1];
+    if (last) await select(last.idx);
+  } catch (cause) {
+    generateError.value = errorMessage(cause);
+    await Promise.allSettled([refreshList(), refreshQueue()]);
+  } finally {
+    batchRunning.value = false;
+  }
+}
+
 async function select(idx: number) {
   actionError.value = null;
   try {
@@ -75,7 +143,7 @@ async function generate() {
       `/api/books/${bookId.value}/chapters/${newChapterIdx.value}/generate`,
       {}
     );
-    await refreshList();
+    await Promise.all([refreshList(), refreshQueue()]);
     if (result.chapter) {
       await select(result.chapter.idx);
     } else {
@@ -85,8 +153,8 @@ async function generate() {
     }
   } catch (cause) {
     generateError.value = errorMessage(cause);
-    // 失败也已落盘（断点续跑的起点），刷新列表呈现运行状态
-    await refreshList().catch(() => undefined);
+    // 失败也已落盘（断点续跑的起点），刷新列表与队列呈现运行状态
+    await Promise.allSettled([refreshList(), refreshQueue()]);
   } finally {
     generating.value = false;
   }
@@ -152,6 +220,8 @@ async function load() {
     book.value = await api.get<Book>(`/api/books/${id}`);
     outlineTree.value = await api.get<OutlineTree>(`/api/books/${id}/outlines`);
     await refreshList();
+    await refreshQueue();
+    pipelineSettings.value = await api.get<PipelineSettings>('/api/settings/pipeline').catch(() => null);
     // 选中章仍在则保留；否则选第一已生成章
     if (selectedIdx.value !== null && chapters.value.some((item) => item.idx === selectedIdx.value)) {
       await select(selectedIdx.value);
@@ -215,6 +285,42 @@ onMounted(load);
           没有已批准的章纲。先到两级大纲页规划并批准章纲，再回来生成。
         </p>
         <p v-if="generateError" class="error-text">{{ generateError }}</p>
+      </section>
+
+      <!-- 批量连跑 + 队列视图（T13） -->
+      <section class="panel">
+        <div class="panel-head">
+          <h2>批量连跑（队列视图）</h2>
+          <span v-if="pipelineSettings" class="muted small">
+            预设：{{ INTERVENTION_MODE_LABELS[pipelineSettings.mode] }} · 连跑上限 {{ pipelineSettings.autoRunLimit }} 章
+          </span>
+        </div>
+        <div class="writing-generate">
+          <button
+            class="btn btn-primary"
+            type="button"
+            :disabled="batchRunning || (pipelineSettings !== null && pipelineSettings.mode !== 'auto')"
+            @click="runBatch"
+          >
+            {{ batchRunning ? '连跑中（逐章 prepare→draft→verify→fix→commit）……' : `连跑至多 ${pipelineSettings?.autoRunLimit ?? 5} 章` }}
+          </button>
+          <span class="muted small">
+            从第一个未完成章连续生成；到达上限自动暂停待审，任一章挂起即阻塞后续（到挂起队列处理后恢复）。
+            {{ pipelineSettings && pipelineSettings.mode !== 'auto' ? '当前为协作预设，连跑不可用——可在设置中切换。' : '' }}
+          </span>
+        </div>
+        <p v-if="batchNotice" class="batch-notice" :class="{ 'error-text': batchNotice.reason === 'suspended' || batchNotice.reason === 'error' }">
+          【{{ BATCH_STOP_REASON_LABELS[batchNotice.reason] }}】{{ batchNotice.message }}
+        </p>
+        <div v-if="queueItems.length === 0" class="empty muted">本书还没有章纲，队列视图随两级大纲实时生成。</div>
+        <div v-else class="writing-list">
+          <div v-for="item in queueItems" :key="item.idx" class="writing-row writing-row-static">
+            <span class="writing-row-title">第{{ item.idx }}章 {{ item.title }}</span>
+            <span v-if="item.run && item.run.status !== 'done'" class="chip chip-static">断点</span>
+            <span class="muted small">{{ item.chapter ? `${item.chapter.charCount} 字` : '未落稿' }}</span>
+            <span class="chip chip-static" :class="queueStatusClass(item)">{{ queueStatus(item) }}</span>
+          </div>
+        </div>
       </section>
 
       <!-- 章节列表 -->

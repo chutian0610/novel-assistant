@@ -1209,3 +1209,13 @@ h3 {
   width: 100%;
   white-space: nowrap;
 }
+
+/* ---- 批量连跑（T13） ---- */
+.batch-notice {
+  margin: 10px 0 0;
+  padding: 10px 14px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg);
+  font-size: 13px;
+}

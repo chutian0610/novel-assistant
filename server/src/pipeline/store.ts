@@ -423,6 +423,29 @@ export function commitChapterRun(db: DB, bookId: number, idx: number): CommitOut
   return { chapterId, chapter, run: getRun(db, bookId, idx)!, snapshots: listSnapshots(db, chapterId) };
 }
 
+// ---------- 运行状态摘要投影（列表/队列/连跑等重负载场景共用） ----------
+
+/** 运行状态摘要（不带注入视图与双报告）；与 web/src/types.ts CompactRun 镜像同步 */
+export interface CompactRun {
+  stage: PipelineStage;
+  status: PipelineStatus;
+  attempts: number;
+  fixRounds: number;
+  error: string | null;
+  extractError: string | null;
+}
+
+export function toCompactRun(run: PipelineRunRecord): CompactRun {
+  return {
+    stage: run.stage,
+    status: run.status,
+    attempts: run.attempts,
+    fixRounds: run.fixRounds,
+    error: run.error,
+    extractError: run.extractError,
+  };
+}
+
 // ---------- 指标落库（verify 双报告之一，跨章趋势数据源） ----------
 
 export interface ChapterMetricsRecord {
