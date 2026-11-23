@@ -3,6 +3,7 @@ import { z } from 'zod';
 import type { DB } from '../db/open';
 import { resolveRoute } from '../llm/resolver';
 import { PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
+import { getPipelineConfig, INTERVENTION_MODES, MAX_AUTO_RUN_LIMIT, updatePipelineConfig } from '../pipeline/config';
 import { HttpError } from './errors';
 import { parseBody, parseId, readJson } from './validate';
 
@@ -168,6 +169,25 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
       baseUrl: route.baseUrl,
       error,
     });
+  });
+
+  // ---------- 管线预设（T13，ADR-0001 两预设） ----------
+
+  const pipelineConfigSchema = z
+    .object({
+      mode: z.enum(INTERVENTION_MODES).optional(),
+      autoRunLimit: z.number().int().min(1, '连跑上限至少为 1').max(MAX_AUTO_RUN_LIMIT, `连跑上限最大 ${MAX_AUTO_RUN_LIMIT}`).optional(),
+    })
+    .strict()
+    .refine((patch) => Object.keys(patch).length > 0, '至少提供一个要更新的字段');
+
+  app.get('/pipeline', (c) => {
+    return c.json(getPipelineConfig(deps.db));
+  });
+
+  app.put('/pipeline', async (c) => {
+    const patch = parseBody(pipelineConfigSchema, await readJson(c));
+    return c.json(updatePipelineConfig(deps.db, patch));
   });
 
   return app;

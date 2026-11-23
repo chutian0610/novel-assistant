@@ -406,4 +406,17 @@ export const MIGRATIONS: readonly string[] = [
   ALTER TABLE foreshadows ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
   ALTER TABLE pipeline_runs ADD COLUMN extract_error TEXT;
   `,
+
+  // v12：介入点预设（T13，ADR-0001 两预设）——键值表存管线预设：mode（collaborative=协作
+  // 逐章审阅 / auto=全自动连跑）与 auto_run_limit（连跑上限，默认 5）；取值白名单与
+  // 范围由应用层把守（同 detector_configs 口径），种子行即默认值。
+  `
+  CREATE TABLE pipeline_configs (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('mode', 'collaborative'), ('auto_run_limit', '5');
+  `,
 ];
