@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { api, errorMessage } from '../api';
-import type { Book, BookMaterialItem, BookMaterialListResponse } from '../types';
+import type { Book, BookMaterialItem, BookMaterialListResponse, ChapterOutline, OutlineTree, Volume } from '../types';
 import BookEditor from '../components/BookEditor.vue';
 import MaterialPicker from '../components/MaterialPicker.vue';
 import OverrideEditor from '../components/OverrideEditor.vue';
@@ -21,6 +21,16 @@ const editorVisible = ref(false);
 const pickerVisible = ref(false);
 const overriding = ref<BookMaterialItem | null>(null);
 
+// 全书/分卷导出（T14）：格式 + 范围（全书或指定卷）
+const outlineTreeData = ref<OutlineTree | null>(null);
+const exportScope = ref<string>('all');
+const exporting = ref(false);
+const exportError = ref<string | null>(null);
+const exportOk = ref<string | null>(null);
+
+const volumes = computed<(Volume & { chapters: ChapterOutline[] })[]>(() => outlineTreeData.value?.volumes ?? []);
+const volumeById = computed(() => new Map(volumes.value.map((volume) => [volume.id, volume])));
+
 async function load() {
   const id = bookId.value;
   if (!Number.isInteger(id) || id <= 0) {
@@ -33,6 +43,7 @@ async function load() {
   try {
     book.value = await api.get<Book>(`/api/books/${id}`);
     items.value = (await api.get<BookMaterialListResponse>(`/api/books/${id}/materials`)).items;
+    outlineTreeData.value = await api.get<OutlineTree>(`/api/books/${id}/outlines`);
   } catch (cause) {
     loadError.value = errorMessage(cause);
   } finally {
@@ -48,6 +59,36 @@ async function addMaterial(id: number) {
     await load();
   } catch (cause) {
     actionError.value = errorMessage(cause);
+  }
+}
+
+/** 导出为 txt/markdown 并触发浏览器下载（文件名含书名与范围） */
+async function exportBook(format: 'txt' | 'markdown') {
+  if (exporting.value) return;
+  exporting.value = true;
+  exportError.value = null;
+  exportOk.value = null;
+  try {
+    const volumeId = exportScope.value === 'all' ? null : Number(exportScope.value);
+    const scope = volumeId === null ? '' : `&volumeId=${volumeId}`;
+    const body = await api.getText(`/api/books/${bookId.value}/export?format=${format}${scope}`);
+    const suffix = volumeId === null ? '' : `·${volumeById.value.get(volumeId)?.title ?? volumeId}`;
+    const filename = `${book.value?.title ?? '导出'}${suffix}.${format === 'txt' ? 'txt' : 'md'}`;
+    const url = URL.createObjectURL(new Blob([body], { type: format === 'txt' ? 'text/plain' : 'text/markdown' }));
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    // 未落稿章不进导出文件：按大纲树位置数与已落稿章数差值提示缺章
+    const totalPositions = volumes.value.reduce((sum, volume) => sum + volume.chapters.length, 0);
+    const generated = (await api.get<BookMaterialListResponse & { items: unknown }>(`/api/books/${bookId.value}/chapters`)) as unknown as { items: unknown[] };
+    const skipped = totalPositions - generated.items.length;
+    exportOk.value = `已导出 ${filename}${skipped > 0 ? `（已跳过 ${skipped} 个未落稿章）` : ''}`;
+  } catch (cause) {
+    exportError.value = errorMessage(cause);
+  } finally {
+    exporting.value = false;
   }
 }
 
@@ -90,6 +131,16 @@ onMounted(load);
             <RouterLink :to="`/books/${book.id}/facts`" class="btn">事实面板</RouterLink>
             <RouterLink :to="`/books/${book.id}/packing`" class="btn">注入视图</RouterLink>
             <button class="btn" type="button" @click="editorVisible = true">编辑书契约</button>
+          </div>
+          <div class="export-bar">
+            <select v-model="exportScope" class="select export-scope">
+              <option value="all">全书</option>
+              <option v-for="volume in volumes" :key="volume.id" :value="String(volume.id)">{{ volume.title }}</option>
+            </select>
+            <button class="btn" type="button" :disabled="exporting" @click="exportBook('txt')">导出 TXT</button>
+            <button class="btn" type="button" :disabled="exporting" @click="exportBook('markdown')">导出 Markdown</button>
+            <span v-if="exportOk" class="ok-text small">{{ exportOk }}</span>
+            <span v-if="exportError" class="error-text small">{{ exportError }}</span>
           </div>
         </div>
         <div class="contract-grid">

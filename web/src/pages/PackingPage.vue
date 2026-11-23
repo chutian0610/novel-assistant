@@ -23,6 +23,8 @@ const budgetInput = ref<string | number>(DEFAULT_BUDGET_TOKENS);
 
 const REF_TYPE_LABELS: Record<PackingItem['refType'], string> = {
   'book-contract': '书契约',
+  'author-profile': '作者偏好',
+  'style-sample': '文风样本',
   'volume-outline': '卷纲',
   'chapter-outline': '章纲',
   'character-state': '角色运行时',
@@ -111,7 +113,7 @@ onMounted(load);
       <RouterLink :to="`/books/${bookId}`" class="muted small">← 返回书详情</RouterLink>
       <h1>注入视图预览<template v-if="book"> · {{ book.title }}</template></h1>
       <p class="page-sub">
-        装填进 prompt 的子集：必带层（书契约 / 本章大纲 / 出场角色运行时）永不丢失，相关性层按相关度选材、按预算截断，
+        装填进 prompt 的子集：必带层（书契约 / 作者偏好 / 本章大纲 / 出场角色运行时）永不丢失，相关性层按相关度选材、按预算截断，
         注入一律按章节号升序（ADR-0002）。全量库与注入视图严格分离。
       </p>
     </header>

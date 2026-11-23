@@ -3,7 +3,9 @@ import { z } from 'zod';
 import type { DB } from '../db/open';
 import { resolveRoute } from '../llm/resolver';
 import { PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
+import { getMaterial } from '../materials/store';
 import { getPipelineConfig, INTERVENTION_MODES, MAX_AUTO_RUN_LIMIT, updatePipelineConfig } from '../pipeline/config';
+import { getAuthorProfileView, updateAuthorProfile } from '../profile/store';
 import { HttpError } from './errors';
 import { parseBody, parseId, readJson } from './validate';
 
@@ -188,6 +190,36 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
   app.put('/pipeline', async (c) => {
     const patch = parseBody(pipelineConfigSchema, await readJson(c));
     return c.json(updatePipelineConfig(deps.db, patch));
+  });
+
+  // ---------- 作者偏好档案（T14，全局单例） ----------
+
+  const authorProfileSchema = z
+    .object({
+      themePreference: z.string().trim().max(2000, '主题偏好过长').optional(),
+      taboos: z.string().trim().max(2000, '创作禁区过长').optional(),
+      styleSampleIds: z.array(z.number().int().positive()).max(50, '文风样本引用过多').optional(),
+    })
+    .strict()
+    .refine((patch) => Object.keys(patch).length > 0, '至少提供一个要更新的字段');
+
+  app.get('/author-profile', (c) => {
+    return c.json(getAuthorProfileView(deps.db));
+  });
+
+  app.put('/author-profile', async (c) => {
+    const patch = parseBody(authorProfileSchema, await readJson(c));
+    // 文风样本引用校验：素材必须存在且为 style 类型（回灌/注入都以此为准）
+    if (patch.styleSampleIds !== undefined) {
+      for (const id of patch.styleSampleIds) {
+        const material = getMaterial(deps.db, id);
+        if (!material) throw new HttpError(400, `参数 styleSampleIds：素材 ${id} 不存在`);
+        if (material.type !== 'style') {
+          throw new HttpError(400, `参数 styleSampleIds：素材 ${id} 不是文风样本（type=style）`);
+        }
+      }
+    }
+    return c.json(updateAuthorProfile(deps.db, patch));
   });
 
   return app;

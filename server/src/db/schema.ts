@@ -419,4 +419,17 @@ export const MIGRATIONS: readonly string[] = [
 
   INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('mode', 'collaborative'), ('auto_run_limit', '5');
   `,
+
+  // v13：作者偏好档案（T14，CONTEXT.md「作者偏好档案」全局单例）——主题偏好 + 创作禁区
+  // + 文风样本引用（素材 id 数组，JSON 落盘；素材删除后由读取侧过滤失效引用，单例行 id=1）。
+  `
+  CREATE TABLE author_profile (
+    id INTEGER PRIMARY KEY CHECK (id = 1),
+    theme_preference TEXT NOT NULL DEFAULT '',
+    taboos TEXT NOT NULL DEFAULT '',
+    style_sample_ids TEXT NOT NULL DEFAULT '[]'
+  );
+
+  INSERT OR IGNORE INTO author_profile (id) VALUES (1);
+  `,
 ];
