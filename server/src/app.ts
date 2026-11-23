@@ -12,6 +12,7 @@ import { factsRoutes } from './api/facts';
 import { detectorsRoutes } from './api/detectors';
 import { outlinesRoutes } from './api/outlines';
 import { packingRoutes } from './api/packing';
+import { exportRoutes } from './api/export';
 import { referencesRoutes } from './api/references';
 import { errorHandler, requestLogger } from './api/middleware';
 
@@ -36,6 +37,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', factsRoutes(deps));
   app.route('/api', detectorsRoutes(deps));
   app.route('/api', packingRoutes(deps));
+  app.route('/api', exportRoutes(deps));
   app.route('/api', referencesRoutes(deps));
   app.notFound((c) => c.json({ error: '接口不存在' }, 404));
   return app;

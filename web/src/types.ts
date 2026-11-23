@@ -321,10 +321,10 @@ export interface ExtractRunResult {
 
 // ---- 注入视图（与 server/src/packing/pack.ts 为镜像副本，增删字段须两处同步） ----
 
-export type PackingLayerKey = 'contract' | 'outline' | 'characters' | 'relevance';
+export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'characters' | 'relevance';
 
 export interface PackingItem {
-  refType: 'book-contract' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
+  refType: 'book-contract' | 'author-profile' | 'style-sample' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
   refId: number | null;
   title: string;
   /** 注入文本（与后续 prompt 装填共用） */
@@ -699,4 +699,21 @@ export interface QueueItem {
 
 export interface QueueResponse {
   items: QueueItem[];
+}
+
+// ---- 作者偏好档案（与 server/src/profile/store.ts 为镜像副本，增删字段须两处同步） ----
+
+/** 作者偏好档案（CONTEXT.md）：文风样本引用 + 主题偏好 + 创作禁区，全局默认配置，对所有书生效 */
+export interface AuthorProfile {
+  /** 主题偏好（多行文本） */
+  themePreference: string;
+  /** 创作禁区（多行文本） */
+  taboos: string;
+  /** 文风样本素材 id 引用 */
+  styleSampleIds: number[];
+}
+
+export interface AuthorProfileView extends AuthorProfile {
+  /** 解析后的文风样本素材（失效引用已过滤） */
+  styleSamples: Material[];
 }

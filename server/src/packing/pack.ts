@@ -1,6 +1,7 @@
 import { getBook, getBookMaterial, type BookMaterialRecord, type BookRecord } from '../books/store';
 import type { DB } from '../db/open';
 import { CHARACTER_STATE_CATEGORY_LABELS, listCharacterStates } from '../facts/store';
+import { getAuthorProfileView } from '../profile/store';
 import { buildRecallQuery } from '../materials/search';
 import type { MaterialType } from '../materials/store';
 import { getOutlineTree } from '../outlines/store';
@@ -11,10 +12,11 @@ import { estimateTokens } from './tokens';
  * 全量库与注入视图严格分离；本模块只读，不写任何表。
  *
  * 分层与顺序固定：
- *   1. contract   必带——书契约（题材/基调/承诺）
- *   2. outline    必带——该章相关大纲（所属卷纲 + 该章章纲）
- *   3. characters 必带——出场角色运行时（各角色各类目在目标章前的最新状态）
- *   4. relevance  相关——FTS5(BM25) 检索书内引用素材，按相关度选材、按预算截断
+ *   1. contract      必带——书契约（题材/基调/承诺）
+ *   2. authorProfile 必带——作者偏好档案（主题偏好/创作禁区/文风样本引用，全局常驻，T14）
+ *   3. outline       必带——该章相关大纲（所属卷纲 + 该章章纲）
+ *   4. characters    必带——出场角色运行时（各角色各类目在目标章前的最新状态）
+ *   5. relevance     相关——FTS5(BM25) 检索书内引用素材，按相关度选材、按预算截断
  *
  * 关键决策：
  * - 章号 → 章纲：章纲无章号字段，按大纲树顺序（卷序 + 卷内序）取第 N 条；超出范围报错。
@@ -31,10 +33,10 @@ export const DEFAULT_BUDGET_TOKENS = 8000;
 /** 相关性层候选上限：BM25 名次前 200 的素材才进入装填（V1 规模保险丝） */
 const RELEVANCE_CANDIDATE_LIMIT = 200;
 
-export type PackingLayerKey = 'contract' | 'outline' | 'characters' | 'relevance';
+export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'characters' | 'relevance';
 
 export interface PackingItem {
-  refType: 'book-contract' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
+  refType: 'book-contract' | 'author-profile' | 'style-sample' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
   refId: number | null;
   title: string;
   /** 注入文本（预览展示与后续 prompt 装填共用） */
@@ -96,7 +98,7 @@ export function buildInjectionView(db: DB, bookId: number, chapter: number, budg
   const book = getBook(db, bookId);
   if (!book) throw new Error(`书 ${bookId} 不存在（应先由 API 层 404 拦截）`);
   const target = locateChapterOutline(db, bookId, chapter);
-  const must = [contractLayer(book), outlineLayer(target), charactersLayer(db, bookId, chapter)];
+  const must = [contractLayer(book), authorProfileLayer(db), outlineLayer(target), charactersLayer(db, bookId, chapter)];
   // 预算是全视图总账：相关性层只能用必带层之外的剩余额度（必带层永不丢失，额度可为负 → 视为 0）
   const mustTokens = must.reduce((sum, layer) => sum + layer.tokens, 0);
   const relevance = relevanceLayer(db, bookId, target, Math.max(0, budget - mustTokens));
@@ -124,6 +126,38 @@ function contractLayer(book: BookRecord): PackingLayer {
       sourceChapter: null,
     },
   ]);
+}
+
+/** 作者偏好档案层（T14）：主题偏好/创作禁区/文风样本引用，全局常驻必带，空档案时层为空 */
+function authorProfileLayer(db: DB): PackingLayer {
+  const profile = getAuthorProfileView(db);
+  const items: PackingItem[] = [];
+  const profileTexts: { title: string; text: string }[] = [
+    { title: '主题偏好', text: profile.themePreference.trim() },
+    { title: '创作禁区', text: profile.taboos.trim() },
+  ];
+  for (const { title, text: value } of profileTexts) {
+    if (value === '') continue;
+    items.push({
+      refType: 'author-profile',
+      refId: null,
+      title,
+      text: value,
+      tokens: estimateTokens(value),
+      sourceChapter: null,
+    });
+  }
+  for (const material of profile.styleSamples) {
+    items.push({
+      refType: 'style-sample',
+      refId: material.id,
+      title: material.title,
+      text: material.content,
+      tokens: estimateTokens(material.content),
+      sourceChapter: parseSourceChapter(material.source.chapter),
+    });
+  }
+  return layer('authorProfile', '作者偏好', 'must', items);
 }
 
 function outlineLayer(target: FlatChapter): PackingLayer {

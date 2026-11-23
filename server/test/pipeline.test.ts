@@ -114,6 +114,7 @@ it('全管线 happy path：prepare 装填 → draft 生成 → verify 双报告 
   expect(res.body.run.preparedView).not.toBeNull();
   expect(res.body.run.preparedView.layers.map((l: { key: string }) => l.key)).toEqual([
     'contract',
+    'authorProfile',
     'outline',
     'characters',
     'relevance',

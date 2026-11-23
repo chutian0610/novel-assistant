@@ -78,8 +78,8 @@ describe('T9 注入视图：分层装填', () => {
     expect(view.overBudget).toBe(false);
 
     // 四层齐备且顺序固定：必带层在前，相关性层最后
-    expect(view.layers.map((layer) => layer.key)).toEqual(['contract', 'outline', 'characters', 'relevance']);
-    expect(view.layers.map((layer) => layer.kind)).toEqual(['must', 'must', 'must', 'relevance']);
+    expect(view.layers.map((layer) => layer.key)).toEqual(['contract', 'authorProfile', 'outline', 'characters', 'relevance']);
+    expect(view.layers.map((layer) => layer.kind)).toEqual(['must', 'must', 'must', 'must', 'relevance']);
     // 每层 token 数等于其条目之和；全局 usedTokens 等于各层之和
     for (const layer of view.layers) {
       expect(layer.tokens).toBe(layer.items.reduce((sum, item) => sum + item.tokens, 0));
