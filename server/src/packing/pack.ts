@@ -5,6 +5,8 @@ import { getAuthorProfileView } from '../profile/store';
 import { buildRecallQuery } from '../materials/search';
 import type { MaterialType } from '../materials/store';
 import { getOutlineTree } from '../outlines/store';
+import { getPipelineConfig } from '../pipeline/config';
+import { listChapters } from '../pipeline/store';
 import { estimateTokens } from './tokens';
 
 /**
@@ -12,14 +14,18 @@ import { estimateTokens } from './tokens';
  * 全量库与注入视图严格分离；本模块只读，不写任何表。
  *
  * 分层与顺序固定：
- *   1. contract      必带——书契约（题材/基调/承诺）
- *   2. authorProfile 必带——作者偏好档案（主题偏好/创作禁区/文风样本引用，全局常驻，T14）
- *   3. outline       必带——该章相关大纲（所属卷纲 + 该章章纲）
- *   4. characters    必带——出场角色运行时（各角色各类目在目标章前的最新状态）
- *   5. relevance     相关——FTS5(BM25) 检索书内引用素材，按相关度选材、按预算截断
+ *   1. contract        必带——书契约（题材/基调/承诺）
+ *   2. authorProfile   必带——作者偏好档案（主题偏好/创作禁区/文风样本引用，全局常驻，T14）
+ *   3. outline         必带——该章相关大纲（所属卷纲 + 该章章纲）
+ *   4. recentSummaries 必带——前文摘要（近 K 章滚动摘要，0=关闭，T15）
+ *   5. characters      必带——出场角色运行时（各角色各类目在目标章前的最新状态）
+ *   6. relevance       相关——FTS5(BM25) 检索书内引用素材，按相关度选材、按预算截断
  *
  * 关键决策：
  * - 章号 → 章纲：章纲无章号字段，按大纲树顺序（卷序 + 卷内序）取第 N 条；超出范围报错。
+ * - 前文摘要（T15）：写作第 N 章时带第 N-K..N-1 章的滚动摘要（chapters.summary，正文
+ *   的确定性派生物），按章号降序（越近越前）。只装已落稿章；V1 缺口修复——摘要此前
+ *   已落库但不进 draft prompt，生成「照章纲盲写」。
  * - 出场角色运行时：写作第 N 章时各角色「此时此刻」= 每角色×类目取 chapter ≤ N 的最新一条
  *   （角色运行时逐章增量语义）；未来章的状态不泄漏，旧状态被新状态取代。
  * - ADR-0002：所有检索/事实条目注入前一律按章节号升序重排；解析不出章节号的排最后。
@@ -33,10 +39,18 @@ export const DEFAULT_BUDGET_TOKENS = 8000;
 /** 相关性层候选上限：BM25 名次前 200 的素材才进入装填（V1 规模保险丝） */
 const RELEVANCE_CANDIDATE_LIMIT = 200;
 
-export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'characters' | 'relevance';
+export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'recentSummaries' | 'characters' | 'relevance';
 
 export interface PackingItem {
-  refType: 'book-contract' | 'author-profile' | 'style-sample' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
+  refType:
+    | 'book-contract'
+    | 'author-profile'
+    | 'style-sample'
+    | 'volume-outline'
+    | 'chapter-outline'
+    | 'chapter-summary'
+    | 'character-state'
+    | 'material';
   refId: number | null;
   title: string;
   /** 注入文本（预览展示与后续 prompt 装填共用） */
@@ -98,7 +112,13 @@ export function buildInjectionView(db: DB, bookId: number, chapter: number, budg
   const book = getBook(db, bookId);
   if (!book) throw new Error(`书 ${bookId} 不存在（应先由 API 层 404 拦截）`);
   const target = locateChapterOutline(db, bookId, chapter);
-  const must = [contractLayer(book), authorProfileLayer(db), outlineLayer(target), charactersLayer(db, bookId, chapter)];
+  const must = [
+    contractLayer(book),
+    authorProfileLayer(db),
+    outlineLayer(target),
+    recentSummariesLayer(db, bookId, chapter),
+    charactersLayer(db, bookId, chapter),
+  ];
   // 预算是全视图总账：相关性层只能用必带层之外的剩余额度（必带层永不丢失，额度可为负 → 视为 0）
   const mustTokens = must.reduce((sum, layer) => sum + layer.tokens, 0);
   const relevance = relevanceLayer(db, bookId, target, Math.max(0, budget - mustTokens));
@@ -178,6 +198,31 @@ function outlineLayer(target: FlatChapter): PackingLayer {
     sourceChapter: null,
   };
   return layer('outline', '本章大纲', 'must', [volumeItem, chapterItem]);
+}
+
+/**
+ * 前文摘要层（T15）：第 N-K..N-1 章的滚动摘要（chapters.summary，正文确定性派生物），
+ * 按章号降序（越近越前）。已落稿章才在 chapters 表里，天然不泄漏未来章；
+ * K=0（管线预设可关）或目标章为第 1 章时层为空。必带层：预算再小也完整携带。
+ */
+function recentSummariesLayer(db: DB, bookId: number, chapter: number): PackingLayer {
+  const limit = getPipelineConfig(db).recentSummariesLimit;
+  if (limit <= 0) return layer('recentSummaries', '前文摘要', 'must', []);
+  const prior = listChapters(db, bookId)
+    .filter((record) => record.idx < chapter && record.summary.trim() !== '')
+    .slice(-limit)
+    .reverse();
+  const items = prior.map(
+    (record): PackingItem => ({
+      refType: 'chapter-summary',
+      refId: null,
+      title: record.title,
+      text: `第${record.idx}章：${record.summary}`,
+      tokens: estimateTokens(`第${record.idx}章：${record.summary}`),
+      sourceChapter: record.idx,
+    })
+  );
+  return layer('recentSummaries', '前文摘要', 'must', items);
 }
 
 function charactersLayer(db: DB, bookId: number, chapter: number): PackingLayer {

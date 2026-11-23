@@ -321,10 +321,18 @@ export interface ExtractRunResult {
 
 // ---- 注入视图（与 server/src/packing/pack.ts 为镜像副本，增删字段须两处同步） ----
 
-export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'characters' | 'relevance';
+export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'recentSummaries' | 'characters' | 'relevance';
 
 export interface PackingItem {
-  refType: 'book-contract' | 'author-profile' | 'style-sample' | 'volume-outline' | 'chapter-outline' | 'character-state' | 'material';
+  refType:
+    | 'book-contract'
+    | 'author-profile'
+    | 'style-sample'
+    | 'volume-outline'
+    | 'chapter-outline'
+    | 'chapter-summary'
+    | 'character-state'
+    | 'material';
   refId: number | null;
   title: string;
   /** 注入文本（与后续 prompt 装填共用） */
@@ -649,6 +657,8 @@ export const INTERVENTION_MODE_LABELS: Record<InterventionMode, string> = {
 export interface PipelineSettings {
   mode: InterventionMode;
   autoRunLimit: number;
+  /** 前文摘要层条数（0=关闭），与 server pipeline/config.ts 为镜像副本 */
+  recentSummariesLimit: number;
 }
 
 export type BatchStopReason = 'limit' | 'suspended' | 'error' | 'precondition' | 'none';

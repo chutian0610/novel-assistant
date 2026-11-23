@@ -116,6 +116,7 @@ it('全管线 happy path：prepare 装填 → draft 生成 → verify 双报告 
     'contract',
     'authorProfile',
     'outline',
+    'recentSummaries',
     'characters',
     'relevance',
   ]);

@@ -432,4 +432,10 @@ export const MIGRATIONS: readonly string[] = [
 
   INSERT OR IGNORE INTO author_profile (id) VALUES (1);
   `,
+
+  // v14：前文摘要层（T15）——draft prompt 补进近 K 章滚动摘要（V1 缺口：摘要已按章
+  // 落库但不进生成上下文，生成「照章纲盲写」）。K 存管线预设键值表，0=关闭，默认 3。
+  `
+  INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('recent_summaries_limit', '3');
+  `,
 ];

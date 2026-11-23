@@ -16,9 +16,14 @@ export type InterventionMode = (typeof INTERVENTION_MODES)[number];
 export const DEFAULT_AUTO_RUN_LIMIT = 5;
 export const MAX_AUTO_RUN_LIMIT = 20;
 
+/** 前文摘要层条数（T15）：draft prompt 携带近 K 章滚动摘要，0=关闭，默认 3 */
+export const DEFAULT_RECENT_SUMMARIES_LIMIT = 3;
+export const MAX_RECENT_SUMMARIES_LIMIT = 10;
+
 export interface PipelineConfig {
   mode: InterventionMode;
   autoRunLimit: number;
+  recentSummariesLimit: number;
 }
 
 interface ConfigRow {
@@ -28,11 +33,16 @@ interface ConfigRow {
 
 const MODE_KEY = 'mode';
 const LIMIT_KEY = 'auto_run_limit';
+const RECENT_SUMMARIES_KEY = 'recent_summaries_limit';
 
 /** 读管线预设：表值合并进默认结构（缺键回退默认，脏值/脏键忽略） */
 export function getPipelineConfig(db: DB): PipelineConfig {
   const rows = db.prepare('SELECT key, value FROM pipeline_configs').all() as ConfigRow[];
-  const config: PipelineConfig = { mode: 'collaborative', autoRunLimit: DEFAULT_AUTO_RUN_LIMIT };
+  const config: PipelineConfig = {
+    mode: 'collaborative',
+    autoRunLimit: DEFAULT_AUTO_RUN_LIMIT,
+    recentSummariesLimit: DEFAULT_RECENT_SUMMARIES_LIMIT,
+  };
   for (const row of rows) {
     if (row.key === MODE_KEY && INTERVENTION_MODES.includes(row.value as InterventionMode)) {
       config.mode = row.value as InterventionMode;
@@ -41,6 +51,12 @@ export function getPipelineConfig(db: DB): PipelineConfig {
       const limit = Number(row.value);
       if (Number.isInteger(limit) && limit >= 1 && limit <= MAX_AUTO_RUN_LIMIT) {
         config.autoRunLimit = limit;
+      }
+    }
+    if (row.key === RECENT_SUMMARIES_KEY) {
+      const limit = Number(row.value);
+      if (Number.isInteger(limit) && limit >= 0 && limit <= MAX_RECENT_SUMMARIES_LIMIT) {
+        config.recentSummariesLimit = limit;
       }
     }
   }
@@ -61,6 +77,14 @@ export function updatePipelineConfig(db: DB, patch: Partial<PipelineConfig>): Pi
       patch.autoRunLimit <= MAX_AUTO_RUN_LIMIT
     ) {
       update.run(String(patch.autoRunLimit), LIMIT_KEY);
+    }
+    if (
+      patch.recentSummariesLimit !== undefined &&
+      Number.isInteger(patch.recentSummariesLimit) &&
+      patch.recentSummariesLimit >= 0 &&
+      patch.recentSummariesLimit <= MAX_RECENT_SUMMARIES_LIMIT
+    ) {
+      update.run(String(patch.recentSummariesLimit), RECENT_SUMMARIES_KEY);
     }
   });
   run();

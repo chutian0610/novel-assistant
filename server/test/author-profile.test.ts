@@ -118,11 +118,12 @@ it('档案进入预算装填必带层：预算再小也不截断', async () => {
   expect(layer.kind).toBe('must');
   expect(layer.items).toHaveLength(3);
 
-  // 层序固定：契约 → 作者偏好 → 大纲 → 角色运行时 → 相关素材
+  // 层序固定：契约 → 作者偏好 → 大纲 → 前文摘要 → 角色运行时 → 相关素材
   expect(view.body.layers.map((candidate: { key: string }) => candidate.key)).toEqual([
     'contract',
     'authorProfile',
     'outline',
+    'recentSummaries',
     'characters',
     'relevance',
   ]);
