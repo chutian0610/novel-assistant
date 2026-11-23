@@ -70,7 +70,7 @@ _Avoid_: 分身、人格
 ### 管线
 
 **章节管线（Chapter Pipeline）**:
-prepare→draft→verify→fix→commit 五阶段状态机，每阶段落盘、断点续跑，commit 时原子更新全部派生物（正文、摘要、事实库、伏笔账本、指标）。
+prepare→draft→verify→fix→commit 五阶段状态机，每阶段落盘、断点续跑，commit 原子更新正文、摘要与版本快照；事实库与伏笔账本由落稿回灌（extract）在 commit 后紧随更新（失败不阻塞提交，可手动重灌），指标随 verify 按章落库。
 _Avoid_: 工作流（泛指时可用）
 
 **闭环（Loop）**:

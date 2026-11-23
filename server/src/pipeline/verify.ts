@@ -8,14 +8,17 @@ import {
   type MetricThreshold,
 } from '../detectors/metrics';
 import type { DB } from '../db/open';
+import { extractFacts } from '../facts/extract-facts';
 import { listCharacterRelations, listCharacterStates, listForeshadows, listTimelineEvents } from '../facts/store';
 import { RouteNotConfiguredError } from '../llm/routed';
 import { resolveRoute } from '../llm/resolver';
+import { parseLooseJson } from '../llm/parse';
 import type { ChatMessage, LLMProvider } from '../llm/types';
 import { PackingRangeError } from '../packing/pack';
 import {
   advanceRun,
   commitChapterRun,
+  type CommitOutcome,
   countPendingSuspensions,
   createSuspension,
   getRun,
@@ -145,20 +148,8 @@ async function executeVerify(db: DB, llm: LLMProvider, bookId: number, idx: numb
 
 /** 解析语义核查响应：容忍代码围栏与前后杂讯；非法条目逐条丢弃，整体不可解析视为失败 */
 export function parseConflicts(content: string): SemanticConflict[] {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  let parsed: unknown;
-  if (start !== -1 && end > start) {
-    try {
-      parsed = JSON.parse(content.slice(start, end + 1));
-    } catch {
-      parsed = null;
-    }
-  }
-  const rawConflicts =
-    parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray((parsed as { conflicts?: unknown }).conflicts)
-      ? ((parsed as { conflicts: unknown[] }).conflicts)
-      : null;
+  const parsed = parseLooseJson(content);
+  const rawConflicts = parsed && Array.isArray(parsed.conflicts) ? (parsed.conflicts as unknown[]) : null;
   if (!rawConflicts) throw new SemanticParseError(`LLM 语义核查响应不是合法的 JSON：${content.slice(0, 80)}`);
 
   const conflicts: SemanticConflict[] = [];
@@ -443,6 +434,38 @@ function reconcileSemanticItems(
   }
 }
 
+/**
+ * commit 阶段 + 落稿事实回灌（T12）：单事务原子落盘后，用 extract 任务路由回灌四表事实。
+ * 回灌失败不阻塞提交、不回滚章节——错误落盘 runs.extract_error，可经手动重灌端点恢复。
+ * generate 主流程与挂起队列的重写/裁决动作都经由这里收尾（回灌以最终提交内容为输入）。
+ */
+export async function commitWithFactSync(db: DB, llm: LLMProvider, bookId: number, idx: number): Promise<CommitOutcome> {
+  const outcome = commitChapterRun(db, bookId, idx);
+  let message: string | null = null;
+  try {
+    await extractFacts(db, llm, bookId, idx);
+  } catch (cause) {
+    message = `事实回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+  return { ...outcome, run: settleFactSync(db, bookId, idx, outcome.run.attempts, message) };
+}
+
+/**
+ * 回灌结果落盘（commit 之后的旁路标记，非阶段执行、不增 attempts）：
+ * message 为 null 表示回灌成功；失败信息落 runs.extract_error 供写作台提示与手动重灌。
+ */
+export function settleFactSync(
+  db: DB,
+  bookId: number,
+  idx: number,
+  attempts: number,
+  message: string | null
+): PipelineRunRecord {
+  advanceRun(db, bookId, idx, { stage: 'done', status: 'done', attempts, error: null, extractError: message });
+  return getRun(db, bookId, idx)!;
+}
+
+
 // ---------- 挂起队列动作（一键重写 / 一键裁决） ----------
 
 /**
@@ -489,11 +512,16 @@ export async function rewriteFromSuspension(
   }
 
   if (!resolveRoute(db, 'draft')) throw new RouteNotConfiguredError('draft');
+  // 矛盾定位重写（T12）：语义项的重写指令带矛盾说明与事实线索，模型知道该向事实看齐
+  const problemText =
+    item.source === 'semantic' && item.detail.factHint
+      ? `${item.reason}；相关事实：${item.detail.factHint}`
+      : item.reason;
   const rewritten = await rewriteSegment(llm, {
     segmentText: draft.slice(start, end),
     before,
     after,
-    problemText: item.reason,
+    problemText,
   });
   const content = draft.slice(0, start) + rewritten + draft.slice(end);
 
@@ -509,7 +537,7 @@ export async function rewriteFromSuspension(
   });
   resolveSuspension(db, bookId, idx, item.id, 'rewrite');
   if (await driveVerification(db, llm, bookId, idx) === 'commit') {
-    commitChapterRun(db, bookId, idx);
+    await commitWithFactSync(db, llm, bookId, idx);
   }
 }
 
@@ -527,7 +555,7 @@ export async function resolveFromSuspension(
   if (run.status === 'suspended' && countPendingSuspensions(db, bookId, idx) === 0) {
     advanceRun(db, bookId, idx, { stage: 'fix', status: 'running', attempts: run.attempts, error: null });
     if (await driveVerification(db, llm, bookId, idx) === 'commit') {
-      commitChapterRun(db, bookId, idx);
+      await commitWithFactSync(db, llm, bookId, idx);
     }
   }
 }

@@ -395,4 +395,15 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_pipeline_suspensions_book ON pipeline_suspensions(book_id, idx, status);
   `,
+
+  // v11：事实自动回灌（T12，ADR-0002）——四事实表加 origin 来源标记（auto=落稿回灌，manual=人工
+  // 维护；无 CHECK，取值由应用层把守），同章自动事实在重复 commit 时整章替换实现幂等；
+  // pipeline_runs 加 extract_error 记录回灌失败（回灌失败不阻塞章节提交，可手动重灌）。
+  `
+  ALTER TABLE character_states ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+  ALTER TABLE character_relations ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+  ALTER TABLE timeline_events ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+  ALTER TABLE foreshadows ADD COLUMN origin TEXT NOT NULL DEFAULT 'manual';
+  ALTER TABLE pipeline_runs ADD COLUMN extract_error TEXT;
+  `,
 ];

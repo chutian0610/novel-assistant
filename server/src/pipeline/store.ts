@@ -68,6 +68,8 @@ export interface PipelineRunRecord {
   detectionReport: DetectionReport | null;
   /** verify 产物：LLM 语义核查报告（双报告之二） */
   semanticReport: SemanticReport | null;
+  /** 落稿后事实回灌的失败信息（null = 已回灌或无需回灌）；失败不阻塞提交，可手动重灌 */
+  extractError: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -107,6 +109,7 @@ interface RunRow {
   fix_rounds: number;
   detection_report: string | null;
   semantic_report: string | null;
+  extract_error: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -148,6 +151,7 @@ function toRunRecord(row: RunRow): PipelineRunRecord {
     fixRounds: row.fix_rounds,
     detectionReport: parseJson(row.detection_report) as DetectionReport | null,
     semanticReport: parseJson(row.semantic_report) as SemanticReport | null,
+    extractError: row.extract_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -196,9 +200,12 @@ export interface RunStagePatch {
   detectionReport?: DetectionReport | null;
   /** 传入则覆写语义核查报告（null = 清空待复检） */
   semanticReport?: SemanticReport | null;
+  /** 传入则覆写事实回灌失败信息 */
+  extractError?: string | null;
 }
 
-/** 阶段推进统一入口：每次阶段执行（成功或失败）恰好调用一次，attempts 由调用方累计 */
+/** 运行状态推进统一入口：每次阶段执行（成功或失败）恰好调用一次、attempts 由调用方累计；
+ *  少数非阶段旁路标记（如回灌结果 settleFactSync）也经此入口落盘，复用既有 attempts。 */
 export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStagePatch): void {
   const assignments = [
     'stage = ?',
@@ -210,6 +217,7 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
     patch.fixRounds !== undefined ? 'fix_rounds = ?' : null,
     patch.detectionReport !== undefined ? 'detection_report = ?' : null,
     patch.semanticReport !== undefined ? 'semantic_report = ?' : null,
+    patch.extractError !== undefined ? 'extract_error = ?' : null,
     `updated_at = ${NOW}`,
   ].filter((item): item is string => item !== null);
   const values: (string | number | null)[] = [
@@ -232,6 +240,9 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
   }
   if (patch.semanticReport !== undefined) {
     values.push(patch.semanticReport === null ? null : JSON.stringify(patch.semanticReport));
+  }
+  if (patch.extractError !== undefined) {
+    values.push(patch.extractError);
   }
   values.push(bookId, idx);
   db.prepare(`UPDATE pipeline_runs SET ${assignments.join(', ')} WHERE book_id = ? AND idx = ?`).run(...values);

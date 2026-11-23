@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { api, errorMessage } from '../api';
-import type { Book, Chapter, ChapterDetail, ChapterListItem, ChapterListResponse, GenerateResult, OutlineTree } from '../types';
+import type { Book, Chapter, ChapterDetail, ChapterListItem, ChapterListResponse, GenerateResult, OutlineTree, PipelineRun } from '../types';
 import { PIPELINE_STAGE_LABELS, PIPELINE_STATUS_LABELS, SNAPSHOT_SOURCE_LABELS } from '../types';
 
 const route = useRoute();
@@ -124,6 +124,21 @@ async function revert(snapshotId: number) {
   }
 }
 
+/** 事实回灌失败后的手动重灌（同章 auto 事实整章替换，幂等） */
+async function resyncFacts() {
+  if (detail.value === null) return;
+  actionError.value = null;
+  try {
+    const result = await api.post<{ run: PipelineRun }>(
+      `/api/books/${bookId.value}/chapters/${detail.value.chapter.idx}/extract`,
+      {}
+    );
+    detail.value = { ...detail.value, run: result.run };
+  } catch (cause) {
+    actionError.value = errorMessage(cause);
+  }
+}
+
 async function load() {
   const id = bookId.value;
   if (!Number.isInteger(id) || id <= 0) {
@@ -240,6 +255,10 @@ onMounted(load);
           </p>
           <p v-else-if="detailRun && detailRun.status !== 'done'" class="error-text">
             生成管线未完成（{{ PIPELINE_STATUS_LABELS[detailRun.status] }}，阶段：{{ PIPELINE_STAGE_LABELS[detailRun.stage] }}）{{ detailRun.error ? `：${detailRun.error}` : '' }}。再次点「生成」会从断点续跑。
+          </p>
+          <p v-else-if="detailRun?.extractError" class="error-text">
+            {{ detailRun.extractError }}（章节已提交，事实面板缺本章数据时事实库可能滞后）
+            <button class="btn btn-ghost small" type="button" @click="resyncFacts">重新回灌</button>
           </p>
           <textarea v-model="editorContent" class="input writing-editor" rows="16" spellcheck="false"></textarea>
           <div class="writing-editor-foot">
