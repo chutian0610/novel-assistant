@@ -76,7 +76,13 @@ async function generate() {
       {}
     );
     await refreshList();
-    await select(result.chapter.idx);
+    if (result.chapter) {
+      await select(result.chapter.idx);
+    } else {
+      // 闸门未过（重写轮次用尽 / 语义冲突）：管线挂起，去挂起队列裁决
+      generateError.value =
+        '闸门未过，本章已挂起等待人工裁决（fix 重写轮次用尽或语义核查发现事实矛盾）。到挂起队列处理后可自动提交。';
+    }
   } catch (cause) {
     generateError.value = errorMessage(cause);
     // 失败也已落盘（断点续跑的起点），刷新列表呈现运行状态
@@ -185,8 +191,10 @@ onMounted(load);
             :disabled="generatableChapters.length === 0 || generating || newChapterIdx === null"
             @click="generate"
           >
-            {{ generating ? `正在生成第 ${newChapterIdx} 章（prepare→draft→commit）……` : `生成第 ${newChapterIdx ?? '-'} 章` }}
+            {{ generating ? `正在生成第 ${newChapterIdx} 章（prepare→draft→verify→fix→commit）……` : `生成第 ${newChapterIdx ?? '-'} 章` }}
           </button>
+          <RouterLink :to="`/books/${bookId}/suspensions`" class="btn btn-ghost small">挂起队列</RouterLink>
+          <RouterLink :to="`/books/${bookId}/metrics`" class="btn btn-ghost small">检测报告</RouterLink>
         </div>
         <p v-if="generatableChapters.length === 0" class="empty muted">
           没有已批准的章纲。先到两级大纲页规划并批准章纲，再回来生成。
@@ -225,7 +233,12 @@ onMounted(load);
             <h2>第{{ detail.chapter.idx }}章 {{ detail.chapter.title }}</h2>
             <span class="muted small">{{ detail.chapter.charCount }} 字 · 更新于 {{ formatTime(detail.chapter.updatedAt) }}</span>
           </div>
-          <p v-if="detailRun && detailRun.status !== 'done'" class="error-text">
+          <p v-if="detailRun && detailRun.status === 'suspended'" class="error-text">
+            本章已挂起（fix 重写轮次用尽或语义核查发现事实矛盾），需到
+            <RouterLink :to="`/books/${bookId}/suspensions`">挂起队列</RouterLink>
+            裁决后才能提交；管线未完成期间正文编辑被冻结。
+          </p>
+          <p v-else-if="detailRun && detailRun.status !== 'done'" class="error-text">
             生成管线未完成（{{ PIPELINE_STATUS_LABELS[detailRun.status] }}，阶段：{{ PIPELINE_STAGE_LABELS[detailRun.stage] }}）{{ detailRun.error ? `：${detailRun.error}` : '' }}。再次点「生成」会从断点续跑。
           </p>
           <textarea v-model="editorContent" class="input writing-editor" rows="16" spellcheck="false"></textarea>

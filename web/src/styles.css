@@ -1125,3 +1125,87 @@ h3 {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* ---- 挂起队列与检测报告（T11） ---- */
+.suspension-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--danger);
+  border-radius: 6px;
+  background: #fff;
+}
+.suspension-card:has(.chip:not(.writing-chip-failed)) {
+  border-left-color: var(--warn-text);
+}
+.suspension-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.suspension-reason {
+  margin: 0;
+}
+.suspension-evidence {
+  margin: 0;
+  padding: 8px 12px;
+  background: var(--warn-bg);
+  border-radius: 4px;
+  font-size: 13px;
+  line-height: 1.8;
+}
+.suspension-evidence li {
+  margin-left: 18px;
+}
+.suspension-actions {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+.metrics-trend {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.metrics-row {
+  display: grid;
+  grid-template-columns: 220px 1fr 56px 200px;
+  align-items: center;
+  gap: 12px;
+}
+.metrics-row-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+.metrics-bar {
+  height: 12px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+.metrics-bar-fill {
+  height: 100%;
+  background: var(--ok);
+  border-radius: 6px;
+}
+.metrics-bar-fill.metrics-bar-bad {
+  background: var(--danger);
+}
+.metrics-row-value {
+  font-weight: 600;
+  text-align: right;
+}
+.metrics-table-wrap {
+  overflow-x: auto;
+}
+.metrics-table {
+  width: 100%;
+  white-space: nowrap;
+}

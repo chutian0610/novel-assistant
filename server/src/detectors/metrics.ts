@@ -39,6 +39,18 @@ export const METRIC_KEYS = [
 ] as const;
 export type MetricKey = (typeof METRIC_KEYS)[number];
 
+/** 维度中文名（挂起队列标题与报告展示用）；web/src/types.ts 有镜像副本，增删须两处同步 */
+export const METRIC_LABELS: Record<MetricKey, string> = {
+  trigramRepetition: '句内 3-gram 复读率',
+  sentenceLengthCV: '句长波动',
+  lexicalDiversity: '词汇多样性',
+  templatePhrase: '模板套话',
+  punctuationCV: '标点节奏',
+  dialogueRatio: '对白比例',
+  emotionDensity: '情绪密度',
+  semanticSmoothness: '语义平滑',
+};
+
 /**
  * 加权权重，固化于代码（spec 验收：权重序 重复>句长>词汇>模板>标点>对白>情绪>语义）。
  * 阈值可配置（detector_configs），权重不开放配置。
