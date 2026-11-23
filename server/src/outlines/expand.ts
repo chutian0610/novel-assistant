@@ -1,3 +1,4 @@
+import { parseLooseJson } from '../llm/parse';
 import type { LLMProvider } from '../llm/types';
 import type { BookRecord } from '../books/store';
 import { OUTLINE_STATUS_LABELS, type ChapterOutlineRecord, type VolumeRecord } from './store';
@@ -67,20 +68,8 @@ export async function expandChapterOutline(llm: LLMProvider, ctx: ExpandContext)
 
 /** 解析 LLM 响应：容忍代码围栏与前后杂讯；非法条目逐条丢弃，有效方案不足 3 个视为整体失败 */
 export function parseOptions(content: string): ExpansionOption[] {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  let parsed: unknown;
-  if (start !== -1 && end > start) {
-    try {
-      parsed = JSON.parse(content.slice(start, end + 1));
-    } catch {
-      parsed = null;
-    }
-  }
-  const rawOptions =
-    parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray((parsed as { options?: unknown }).options)
-      ? ((parsed as { options: unknown[] }).options)
-      : null;
+  const parsed = parseLooseJson(content);
+  const rawOptions = parsed && Array.isArray(parsed.options) ? (parsed.options as unknown[]) : null;
   if (!rawOptions) throw new OutlineParseError(`LLM 响应不是合法的展开方案 JSON：${content.slice(0, 80)}`);
 
   const options: { title: string; summary: string }[] = [];

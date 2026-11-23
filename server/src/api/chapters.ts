@@ -4,12 +4,15 @@ import { requireBook } from './books';
 import { getDetectorConfig } from '../detectors/config';
 import { analyzeText } from '../detectors/metrics';
 import type { DB } from '../db/open';
+import { deleteAutoFacts } from '../facts/store';
+import { extractFacts } from '../facts/extract-facts';
 import { RouteNotConfiguredError } from '../llm/routed';
 import type { LLMProvider } from '../llm/types';
 import { PackingRangeError } from '../packing/pack';
 import { deriveSummary, PipelinePreconditionError, runChapterPipeline } from '../pipeline/run';
-import { PipelineStageError } from '../pipeline/verify';
+import { PipelineStageError, settleFactSync } from '../pipeline/verify';
 import {
+  advanceRun,
   getChapter,
   getChapterId,
   getRun,
@@ -117,6 +120,8 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
     db.transaction(() => {
       updateChapterContent(db, bookId, idx, content, summary);
       insertSnapshot(db, chapterId, content, summary, 'edit');
+      // 旧稿的回灌事实随正文失效而清除（溯源不断裂），经「重新回灌」以新稿重建
+      deleteAutoFacts(db, bookId, idx);
     })();
     // 指标派生物同步重算（纯检测，不走 LLM；语义报告随下次 verify 刷新）
     const detection = analyzeText(content, getDetectorConfig(db));
@@ -128,6 +133,27 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       metrics: detection.metrics,
     });
     return c.json(getChapter(db, bookId, idx));
+  });
+
+  // 手动事实回灌（T12）：回灌失败后的重试入口；仅对已落稿章节开放。
+  // 回灌是 commit 旁路：此处 catch-all 落 extractError 返回 200 而非走 500 范式，
+  // 与 commitWithFactSync 的「失败不阻塞、可重试」语义保持一致（编程错误同样可经重试暴露）
+  app.post('/books/:id/chapters/:idx/extract', async (c) => {
+    const bookId = parseId(c.req.param('id'));
+    requireBook(db, bookId, c.req.param('id'));
+    const idx = parseId(c.req.param('idx'));
+    const run = getRun(db, bookId, idx);
+    if (!run || run.status !== 'done' || !getChapter(db, bookId, idx)) {
+      throw new HttpError(404, `书 ${bookId} 还没有已落稿的第 ${idx} 章`);
+    }
+    let message: string | null = null;
+    let facts: unknown = null;
+    try {
+      facts = await extractFacts(db, llm, bookId, idx);
+    } catch (cause) {
+      message = `事实回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
+    }
+    return c.json({ run: settleFactSync(db, bookId, idx, run.attempts, message), facts });
   });
 
   app.post('/books/:id/chapters/:idx/revert', async (c) => {
@@ -144,6 +170,8 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
     db.transaction(() => {
       updateChapterContent(db, bookId, idx, snapshot.content, snapshot.summary);
       insertSnapshot(db, chapterId, snapshot.content, snapshot.summary, 'revert');
+      // 同编辑：回退后旧稿回灌事实清除，可经「重新回灌」重建
+      deleteAutoFacts(db, bookId, idx);
     })();
     // 指标派生物跟随正文重算（与编辑同规则：纯检测，不走 LLM）
     const detection = analyzeText(snapshot.content, getDetectorConfig(db));

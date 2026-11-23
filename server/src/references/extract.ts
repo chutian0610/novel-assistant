@@ -1,3 +1,4 @@
+import { parseLooseJson } from '../llm/parse';
 import { resolveRoute } from '../llm/resolver';
 import { RouteNotConfiguredError } from '../llm/routed';
 import { LLMError, type ChatRequest, type LLMProvider } from '../llm/types';
@@ -159,21 +160,11 @@ export class ExtractionParseError extends Error {
 
 /** 解析 LLM 响应：容忍代码围栏与前后杂讯；非法条目逐条丢弃，整体非 JSON 视为失败 */
 export function parseExtraction(content: string): ExtractedMaterial[] {
-  const start = content.indexOf('{');
-  const end = content.lastIndexOf('}');
-  if (start === -1 || end <= start) {
+  const parsed = parseLooseJson(content);
+  const materials = parsed && Array.isArray(parsed.materials) ? (parsed.materials as unknown[]) : null;
+  if (parsed === null || materials === null) {
     throw new ExtractionParseError(`LLM 响应不是合法的抽取 JSON：${content.slice(0, 80)}`);
   }
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(content.slice(start, end + 1));
-  } catch {
-    throw new ExtractionParseError(`LLM 响应不是合法的抽取 JSON：${content.slice(0, 80)}`);
-  }
-  const materials =
-    parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Array.isArray((parsed as { materials?: unknown }).materials)
-      ? ((parsed as { materials: unknown[] }).materials)
-      : null;
   if (!materials) throw new ExtractionParseError('LLM 响应缺少 materials 数组');
 
   const items: { type: MaterialType; title: string; content: string; payload: MaterialPayload }[] = [];

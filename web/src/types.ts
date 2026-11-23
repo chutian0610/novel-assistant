@@ -172,6 +172,9 @@ export const CHARACTER_STATE_CATEGORY_LABELS: Record<CharacterStateCategory, str
   other: '其他',
 };
 
+// 事实来源：落稿回灌（auto）或人工维护（manual）
+export type FactOrigin = 'auto' | 'manual';
+
 /** 角色运行时：人物在某章的动态状态，带来源章与原文证据 */
 export interface CharacterState {
   id: number;
@@ -181,6 +184,7 @@ export interface CharacterState {
   category: CharacterStateCategory;
   content: string;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -194,6 +198,7 @@ export interface CharacterRelation {
   relation: string;
   chapter: number;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -205,6 +210,7 @@ export interface TimelineEvent {
   title: string;
   content: string;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -229,6 +235,7 @@ export interface Foreshadow {
   /** 目标章：当前章超过此章仍未回收即预警 */
   targetChapter: number;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -486,6 +493,8 @@ export interface PipelineRun {
   detectionReport: DetectionReport | null;
   /** verify 产物：LLM 语义核查报告（双报告之二） */
   semanticReport: SemanticReport | null;
+  /** 落稿后事实回灌的失败信息（null = 已回灌或无需回灌）；失败不阻塞提交，可手动重灌 */
+  extractError: string | null;
   createdAt: string;
   updatedAt: string;
 }

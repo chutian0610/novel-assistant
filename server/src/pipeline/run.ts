@@ -11,10 +11,9 @@ import {
   type FlatChapter,
   type InjectionView,
 } from '../packing/pack';
-import { driveVerification, failRun } from './verify';
+import { commitWithFactSync, driveVerification, failRun } from './verify';
 import {
   advanceRun,
-  commitChapterRun,
   createRun,
   deriveSummary,
   getRun,
@@ -145,8 +144,8 @@ export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: numbe
     return { chapter: null, run: getRun(db, bookId, idx)!, snapshots: [] };
   }
 
-  // ---------- commit：单事务原子落盘（正文 + 版本快照 + run 终态） ----------
-  return commitChapterRun(db, bookId, idx);
+  // ---------- commit：单事务原子落盘 + 落稿事实回灌（回灌失败落盘 extract_error 不阻塞提交） ----------
+  return commitWithFactSync(db, llm, bookId, idx);
 }
 
 export { deriveSummary };

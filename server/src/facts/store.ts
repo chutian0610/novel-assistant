@@ -3,7 +3,8 @@ import type { DB } from '../db/open';
 /**
  * 事实系统存储层（ADR-0002）：事实的正确形态是「带时序的行」——
  * 四张结构化表全部挂书，每条事实带来源章（chapter）+ 原文证据（evidence）供审计。
- * V1 全部手动 CRUD；章节落稿的自动回灌由后续工单接入。
+ * 人工 CRUD 与落稿自动回灌（T12）并存：origin 标记来源（manual/auto），
+ * 回灌只整章替换本章 auto 行，人工事实不受影响；每条事实带来源章（chapter）+ 原文证据（evidence）供审计。
  */
 
 // ---------- 角色运行时 ----------
@@ -19,6 +20,8 @@ export const CHARACTER_STATE_CATEGORY_LABELS: Record<CharacterStateCategory, str
   other: '其他',
 };
 
+export type FactOrigin = 'auto' | 'manual';
+
 export interface CharacterStateRecord {
   id: number;
   bookId: number;
@@ -30,6 +33,8 @@ export interface CharacterStateRecord {
   content: string;
   /** 原文证据 */
   evidence: string;
+  /** 来源：落稿回灌（auto）或人工维护（manual） */
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -45,6 +50,7 @@ export interface CharacterRelationRecord {
   relation: string;
   chapter: number;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -58,6 +64,7 @@ export interface TimelineEventRecord {
   title: string;
   content: string;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -85,6 +92,7 @@ export interface ForeshadowRecord {
   /** 目标章：超过此章仍未回收即预警 */
   targetChapter: number;
   evidence: string;
+  origin: FactOrigin;
   createdAt: string;
   updatedAt: string;
 }
@@ -119,6 +127,7 @@ interface CharacterStateRow {
   category: CharacterStateCategory;
   content: string;
   evidence: string;
+  origin: FactOrigin;
   created_at: string;
   updated_at: string;
 }
@@ -131,6 +140,7 @@ interface CharacterRelationRow {
   relation: string;
   chapter: number;
   evidence: string;
+  origin: FactOrigin;
   created_at: string;
   updated_at: string;
 }
@@ -142,6 +152,7 @@ interface TimelineEventRow {
   title: string;
   content: string;
   evidence: string;
+  origin: FactOrigin;
   created_at: string;
   updated_at: string;
 }
@@ -155,6 +166,7 @@ interface ForeshadowRow {
   planted_chapter: number;
   target_chapter: number;
   evidence: string;
+  origin: FactOrigin;
   created_at: string;
   updated_at: string;
 }
@@ -424,6 +436,7 @@ function toCharacterStateRecord(row: CharacterStateRow): CharacterStateRecord {
     category: row.category,
     content: row.content,
     evidence: row.evidence,
+    origin: row.origin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -438,6 +451,7 @@ function toCharacterRelationRecord(row: CharacterRelationRow): CharacterRelation
     relation: row.relation,
     chapter: row.chapter,
     evidence: row.evidence,
+    origin: row.origin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -451,6 +465,7 @@ function toTimelineEventRecord(row: TimelineEventRow): TimelineEventRecord {
     title: row.title,
     content: row.content,
     evidence: row.evidence,
+    origin: row.origin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -466,7 +481,118 @@ function toForeshadowRecord(row: ForeshadowRow): ForeshadowRecord {
     plantedChapter: row.planted_chapter,
     targetChapter: row.target_chapter,
     evidence: row.evidence,
+    origin: row.origin,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
+}
+
+// ---------- 落稿回灌（T12）：同章 auto 事实整章替换，幂等 ----------
+
+export interface ExtractedState {
+  name: string;
+  category: CharacterStateCategory;
+  content: string;
+  evidence: string;
+}
+
+export interface ExtractedRelation {
+  fromName: string;
+  toName: string;
+  relation: string;
+  evidence: string;
+}
+
+export interface ExtractedTimeline {
+  title: string;
+  content: string;
+  evidence: string;
+}
+
+export interface ExtractedForeshadow {
+  title: string;
+  content: string;
+  targetChapter: number;
+  evidence: string;
+}
+
+export interface ExtractedFacts {
+  characterStates: ExtractedState[];
+  relations: ExtractedRelation[];
+  timeline: ExtractedTimeline[];
+  foreshadows: ExtractedForeshadow[];
+}
+
+/** 正文被编辑/回退后清除本章回灌事实（旧稿证据已失效）；伏笔账本不随正文删除，由作者在账本中维护 */
+export function deleteAutoFacts(db: DB, bookId: number, idx: number): void {
+  const run = db.transaction(() => {
+    db.prepare("DELETE FROM character_states WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+    db.prepare("DELETE FROM character_relations WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+    db.prepare("DELETE FROM timeline_events WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+  });
+  run();
+}
+
+export interface FactSyncCounts {
+  states: number;
+  relations: number;
+  timeline: number;
+  /** 新登记的伏笔数（同章同名伏笔已存在时跳过，账本状态不被回灌覆盖） */
+  foreshadows: number;
+}
+
+/**
+ * 把第 idx 章的提取结果回灌进四表（单事务）：
+ * - 角色运行时/关系/时间轴：删除本章 auto 行后整章重插（重复 commit 幂等，人工行不动）；
+ * - 伏笔：按（埋设章，标题）去重后插入 planted——已存在（含人工登记或已推进状态）即跳过，
+ *   账本的状态机推进不被回灌覆盖。
+ */
+export function replaceAutoFacts(db: DB, bookId: number, idx: number, extracted: ExtractedFacts): FactSyncCounts {
+  const run = db.transaction((): FactSyncCounts => {
+    db.prepare("DELETE FROM character_states WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+    db.prepare("DELETE FROM character_relations WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+    db.prepare("DELETE FROM timeline_events WHERE book_id = ? AND chapter = ? AND origin = 'auto'").run(bookId, idx);
+
+    const insertState = db.prepare(
+      "INSERT INTO character_states (book_id, name, chapter, category, content, evidence, origin) VALUES (?, ?, ?, ?, ?, ?, 'auto')"
+    );
+    for (const state of extracted.characterStates) {
+      insertState.run(bookId, state.name, idx, state.category, state.content, state.evidence);
+    }
+
+    const insertRelation = db.prepare(
+      "INSERT INTO character_relations (book_id, from_name, to_name, relation, chapter, evidence, origin) VALUES (?, ?, ?, ?, ?, ?, 'auto')"
+    );
+    for (const relation of extracted.relations) {
+      insertRelation.run(bookId, relation.fromName, relation.toName, relation.relation, idx, relation.evidence);
+    }
+
+    const insertTimeline = db.prepare(
+      "INSERT INTO timeline_events (book_id, chapter, title, content, evidence, origin) VALUES (?, ?, ?, ?, ?, 'auto')"
+    );
+    for (const event of extracted.timeline) {
+      insertTimeline.run(bookId, idx, event.title, event.content, event.evidence);
+    }
+
+    const foreshadowExists = db.prepare(
+      'SELECT id FROM foreshadows WHERE book_id = ? AND planted_chapter = ? AND title = ?'
+    );
+    const insertForeshadow = db.prepare(
+      "INSERT INTO foreshadows (book_id, title, content, status, planted_chapter, target_chapter, evidence, origin) VALUES (?, ?, ?, 'planted', ?, ?, ?, 'auto')"
+    );
+    let foreshadowCount = 0;
+    for (const foreshadow of extracted.foreshadows) {
+      if (foreshadowExists.get(bookId, idx, foreshadow.title)) continue;
+      insertForeshadow.run(bookId, foreshadow.title, foreshadow.content, idx, foreshadow.targetChapter, foreshadow.evidence);
+      foreshadowCount += 1;
+    }
+
+    return {
+      states: extracted.characterStates.length,
+      relations: extracted.relations.length,
+      timeline: extracted.timeline.length,
+      foreshadows: foreshadowCount,
+    };
+  });
+  return run();
 }
