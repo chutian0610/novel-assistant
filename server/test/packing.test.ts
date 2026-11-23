@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_BUDGET_TOKENS } from '../src/packing/pack';
+import { FakeLLM } from '../src/llm/fake';
+import { draftResult, PASS_TEXT, semanticResult } from './text-fixtures';
 import {
+  configureRoute,
   createTestApp,
   seedBook,
   seedCharacterState,
@@ -77,9 +80,16 @@ describe('T9 注入视图：分层装填', () => {
     expect(view.usedTokens).toBeGreaterThan(0);
     expect(view.overBudget).toBe(false);
 
-    // 四层齐备且顺序固定：必带层在前，相关性层最后
-    expect(view.layers.map((layer) => layer.key)).toEqual(['contract', 'authorProfile', 'outline', 'characters', 'relevance']);
-    expect(view.layers.map((layer) => layer.kind)).toEqual(['must', 'must', 'must', 'must', 'relevance']);
+    // 层齐备且顺序固定：必带层在前（前文摘要层无落稿章时为空但仍占位），相关性层最后
+    expect(view.layers.map((layer) => layer.key)).toEqual([
+      'contract',
+      'authorProfile',
+      'outline',
+      'recentSummaries',
+      'characters',
+      'relevance',
+    ]);
+    expect(view.layers.map((layer) => layer.kind)).toEqual(['must', 'must', 'must', 'must', 'must', 'relevance']);
     // 每层 token 数等于其条目之和；全局 usedTokens 等于各层之和
     for (const layer of view.layers) {
       expect(layer.tokens).toBe(layer.items.reduce((sum, item) => sum + item.tokens, 0));
@@ -394,5 +404,112 @@ describe('T9 注入视图：参数校验', () => {
     expect((await pack(request, book.id, 1, 0)).status).toBe(400);
     expect((await request.get(`/api/books/${book.id}/packing?chapter=1&budget=abc`)).status).toBe(400);
     expect((await pack(request, 999, 1)).status).toBe(404);
+  });
+});
+
+/** 走生成流落稿前 N 章（章纲先批准；draft/verify 路由由 FakeLLM 脚本应答，同 export.test 模式） */
+async function commitChapters(request: TestEnv['request'], bookId: number, volumeId: number, count: number) {
+  for (let idx = 1; idx <= count; idx++) {
+    const outline = await seedChapterOutline(request, bookId, volumeId, { title: `第${idx}章 测试` });
+    await request.post(`/api/books/${bookId}/outlines/chapters/${outline.id}/status`, { status: 'approved' });
+  }
+  for (const task of ['draft', 'verify'] as const) {
+    await configureRoute(request, task);
+  }
+  for (let idx = 1; idx <= count; idx++) {
+    const res = await request.post(`/api/books/${bookId}/chapters/${idx}/generate`, {});
+    if (res.status !== 200) throw new Error(`生成第 ${idx} 章失败：${res.status} ${JSON.stringify(res.body)}`);
+  }
+}
+
+describe('T15 前文摘要层', () => {
+  it('第 1 章没有前文：层占位但为空', async () => {
+    const { request } = createTestApp();
+    const book = await seedBook(request);
+    const volume = await seedVolume(request, book.id);
+    await seedChapterOutline(request, book.id, volume.id);
+    const res = await pack(request, book.id, 1);
+    expect(res.status).toBe(200);
+    const summaries = layerOf(res.body as InjectionView, 'recentSummaries');
+    expect(summaries.kind).toBe('must');
+    expect(summaries.items).toEqual([]);
+  });
+
+  it('带前 K 章滚动摘要：按章号降序、含章号与摘要文本', async () => {
+    const llm = new FakeLLM({ respond: { draft: draftResult(PASS_TEXT), verify: semanticResult([]) } });
+    const { request } = createTestApp(llm);
+    const book = await seedBook(request);
+    const volume = await seedVolume(request, book.id);
+    await commitChapters(request, book.id, volume.id, 2);
+    await seedChapterOutline(request, book.id, volume.id, { title: '第3章 目标' });
+
+    const res = await pack(request, book.id, 3);
+    expect(res.status).toBe(200);
+    const summaries = layerOf(res.body as InjectionView, 'recentSummaries');
+    expect(summaries.items).toHaveLength(2);
+    // 越近越前：第 2 章在前、第 1 章在后
+    expect(summaries.items.map((item) => item.sourceChapter)).toEqual([2, 1]);
+    expect(summaries.items.map((item) => item.refType)).toEqual(['chapter-summary', 'chapter-summary']);
+    expect(summaries.items[0]!.text).toContain('第2章：');
+    expect(summaries.items[1]!.text).toContain('第1章：');
+    for (const item of summaries.items) expect(item.tokens).toBeGreaterThan(0);
+  });
+
+  it('K 默认 3：只带最近 3 章，更早的章不进层', async () => {
+    const llm = new FakeLLM({ respond: { draft: draftResult(PASS_TEXT), verify: semanticResult([]) } });
+    const { request } = createTestApp(llm);
+    const book = await seedBook(request);
+    const volume = await seedVolume(request, book.id);
+    await commitChapters(request, book.id, volume.id, 5);
+    await seedChapterOutline(request, book.id, volume.id, { title: '第6章 目标' });
+
+    const res = await pack(request, book.id, 6);
+    expect(res.status).toBe(200);
+    const summaries = layerOf(res.body as InjectionView, 'recentSummaries');
+    expect(summaries.items.map((item) => item.sourceChapter)).toEqual([5, 4, 3]);
+  });
+
+  it('K 可配：调小只带 2 条，0 关闭层，超界配置 400', async () => {
+    const llm = new FakeLLM({ respond: { draft: draftResult(PASS_TEXT), verify: semanticResult([]) } });
+    const { request } = createTestApp(llm);
+    const book = await seedBook(request);
+    const volume = await seedVolume(request, book.id);
+    await commitChapters(request, book.id, volume.id, 5);
+    await seedChapterOutline(request, book.id, volume.id, { title: '第6章 目标' });
+
+    const put = (patch: Record<string, unknown>) => request.put('/api/settings/pipeline', patch);
+    expect((await put({ recentSummariesLimit: 2 })).status).toBe(200);
+    const two = layerOf((await pack(request, book.id, 6)).body as InjectionView, 'recentSummaries');
+    expect(two.items.map((item) => item.sourceChapter)).toEqual([5, 4]);
+
+    expect((await put({ recentSummariesLimit: 0 })).status).toBe(200);
+    const off = layerOf((await pack(request, book.id, 6)).body as InjectionView, 'recentSummaries');
+    expect(off.items).toEqual([]);
+
+    expect((await put({ recentSummariesLimit: 11 })).status).toBe(400);
+    expect((await put({ recentSummariesLimit: -1 })).status).toBe(400);
+
+    // 恢复默认口径，确认配置真实回读生效
+    await put({ recentSummariesLimit: 4 });
+    const four = layerOf((await pack(request, book.id, 6)).body as InjectionView, 'recentSummaries');
+    expect(four.items.map((item) => item.sourceChapter)).toEqual([5, 4, 3, 2]);
+  });
+
+  it('前文摘要进入 draft prompt：管线 draft 调用携带层文本', async () => {
+    const llm = new FakeLLM({ respond: { draft: draftResult(PASS_TEXT), verify: semanticResult([]) } });
+    const { request } = createTestApp(llm);
+    const book = await seedBook(request);
+    const volume = await seedVolume(request, book.id);
+    await commitChapters(request, book.id, volume.id, 2);
+    const outline = await seedChapterOutline(request, book.id, volume.id, { title: '第3章 目标' });
+    await request.post(`/api/books/${book.id}/outlines/chapters/${outline.id}/status`, { status: 'approved' });
+
+    const genRes = await request.post(`/api/books/${book.id}/chapters/3/generate`, {});
+    expect(genRes.status).toBe(200);
+    const draftCalls = llm.calls.filter((call) => call.task === 'draft');
+    const lastDraft = draftCalls.at(-1)!.req.messages.map((message) => message.content).join('\n');
+    expect(lastDraft).toContain('【前文摘要】');
+    expect(lastDraft).toContain('第2章：');
+    expect(lastDraft).toContain('第1章：');
   });
 });

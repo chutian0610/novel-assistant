@@ -10,7 +10,7 @@ const saveError = ref<string | null>(null);
 const saved = ref(false);
 
 // 表单初值仅占位（与服务端默认值一致的写法副本），onMounted 加载后被真实配置整体覆盖
-const form = reactive<PipelineSettings>({ mode: 'collaborative', autoRunLimit: 5 });
+const form = reactive<PipelineSettings>({ mode: 'collaborative', autoRunLimit: 5, recentSummariesLimit: 3 });
 
 const MODE_HINTS: Record<InterventionMode, string> = {
   collaborative: '逐章审阅：生成一章停一章，审完草稿再继续；适合逐章把控质量。',
@@ -30,6 +30,7 @@ async function save() {
     const updated = await api.put<PipelineSettings>('/api/settings/pipeline', {
       mode: form.mode,
       autoRunLimit: form.autoRunLimit,
+      recentSummariesLimit: form.recentSummariesLimit,
     });
     Object.assign(form, updated);
     saved.value = true;
@@ -72,8 +73,12 @@ onMounted(async () => {
           <span>全自动连跑上限（章）</span>
           <input v-model.number="form.autoRunLimit" class="input" type="number" min="1" max="20" step="1" />
         </label>
+        <label>
+          <span>前文摘要条数（0=关闭）</span>
+          <input v-model.number="form.recentSummariesLimit" class="input" type="number" min="0" max="10" step="1" />
+        </label>
       </div>
-      <p class="muted small">{{ MODE_HINTS[form.mode] }}连跑上限可配 1~20 章，默认 5。</p>
+      <p class="muted small">{{ MODE_HINTS[form.mode] }}连跑上限可配 1~20 章，默认 5。生成时自动携带近 N 章滚动摘要（默认 3，0 关闭）。</p>
       <p v-if="saveError" class="error-text">{{ saveError }}</p>
       <div class="form-actions">
         <button class="btn btn-primary" type="button" :disabled="saving" @click="save">

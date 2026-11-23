@@ -27,6 +27,7 @@ const REF_TYPE_LABELS: Record<PackingItem['refType'], string> = {
   'style-sample': '文风样本',
   'volume-outline': '卷纲',
   'chapter-outline': '章纲',
+  'chapter-summary': '滚动摘要',
   'character-state': '角色运行时',
   material: '素材',
 };
@@ -169,6 +170,7 @@ onMounted(load);
           </div>
           <div v-if="layer.items.length === 0" class="empty muted">
             <template v-if="layer.key === 'characters'">本章之前没有角色运行时记录。</template>
+            <template v-else-if="layer.key === 'recentSummaries'">没有可带的前文摘要（第一章，或层已在管线预设中关闭）。</template>
             <template v-else-if="layer.key === 'relevance' && layer.truncated">候选素材都被预算放下，调大预算即可装回。</template>
             <template v-else-if="layer.key === 'relevance'">没有命中书内引用素材（可在书详情页引用素材进书）。</template>
             <template v-else>本层为空。</template>

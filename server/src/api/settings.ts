@@ -4,7 +4,13 @@ import type { DB } from '../db/open';
 import { resolveRoute } from '../llm/resolver';
 import { PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
 import { getMaterial } from '../materials/store';
-import { getPipelineConfig, INTERVENTION_MODES, MAX_AUTO_RUN_LIMIT, updatePipelineConfig } from '../pipeline/config';
+import {
+  getPipelineConfig,
+  INTERVENTION_MODES,
+  MAX_AUTO_RUN_LIMIT,
+  MAX_RECENT_SUMMARIES_LIMIT,
+  updatePipelineConfig,
+} from '../pipeline/config';
 import { getAuthorProfileView, updateAuthorProfile } from '../profile/store';
 import { HttpError } from './errors';
 import { parseBody, parseId, readJson } from './validate';
@@ -179,6 +185,12 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
     .object({
       mode: z.enum(INTERVENTION_MODES).optional(),
       autoRunLimit: z.number().int().min(1, '连跑上限至少为 1').max(MAX_AUTO_RUN_LIMIT, `连跑上限最大 ${MAX_AUTO_RUN_LIMIT}`).optional(),
+      recentSummariesLimit: z
+        .number()
+        .int()
+        .min(0, '前文摘要条数不能为负（0 为关闭）')
+        .max(MAX_RECENT_SUMMARIES_LIMIT, `前文摘要条数最大 ${MAX_RECENT_SUMMARIES_LIMIT}`)
+        .optional(),
     })
     .strict()
     .refine((patch) => Object.keys(patch).length > 0, '至少提供一个要更新的字段');
