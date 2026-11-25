@@ -9,6 +9,7 @@ import {
 } from '../detectors/metrics';
 import type { DB } from '../db/open';
 import { extractFacts } from '../facts/extract-facts';
+import { analyzeChapter } from '../radar/analyze';
 import { listCharacterRelations, listCharacterStates, listForeshadows, listTimelineEvents } from '../facts/store';
 import { RouteNotConfiguredError } from '../llm/routed';
 import { resolveRoute } from '../llm/resolver';
@@ -435,19 +436,29 @@ function reconcileSemanticItems(
 }
 
 /**
- * commit 阶段 + 落稿事实回灌（T12）：单事务原子落盘后，用 extract 任务路由回灌四表事实。
- * 回灌失败不阻塞提交、不回滚章节——错误落盘 runs.extract_error，可经手动重灌端点恢复。
- * generate 主流程与挂起队列的重写/裁决动作都经由这里收尾（回灌以最终提交内容为输入）。
+ * commit 阶段 + 落稿回灌（T12 事实回灌 + T18 爽点雷达回灌）：单事务原子落盘后，
+ * 用 extract / analyze 任务路由分别回灌四表事实与爽点标注。两条回灌互为旁路、
+ * 互不阻塞（含不阻塞彼此）：失败分别落盘 runs.extract_error / runs.radar_error，
+ * 可经各自的手动重灌端点恢复。generate 主流程与挂起队列的重写/裁决动作都经由这里收尾。
  */
 export async function commitWithFactSync(db: DB, llm: LLMProvider, bookId: number, idx: number): Promise<CommitOutcome> {
   const outcome = commitChapterRun(db, bookId, idx);
-  let message: string | null = null;
+  let factMessage: string | null = null;
   try {
     await extractFacts(db, llm, bookId, idx);
   } catch (cause) {
-    message = `事实回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
+    factMessage = `事实回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
   }
-  return { ...outcome, run: settleFactSync(db, bookId, idx, outcome.run.attempts, message) };
+  let radarMessage: string | null = null;
+  try {
+    await analyzeChapter(db, llm, bookId, idx);
+  } catch (cause) {
+    radarMessage = `爽点回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+  return {
+    ...outcome,
+    run: settleFactSync(db, bookId, idx, outcome.run.attempts, factMessage, radarMessage),
+  };
 }
 
 /**
@@ -459,9 +470,10 @@ export function settleFactSync(
   bookId: number,
   idx: number,
   attempts: number,
-  message: string | null
+  message: string | null,
+  radarMessage: string | null = null
 ): PipelineRunRecord {
-  advanceRun(db, bookId, idx, { stage: 'done', status: 'done', attempts, error: null, extractError: message });
+  advanceRun(db, bookId, idx, { stage: 'done', status: 'done', attempts, error: null, extractError: message, radarError: radarMessage });
   return getRun(db, bookId, idx)!;
 }
 

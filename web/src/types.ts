@@ -1,5 +1,5 @@
 // 任务类型：与 server/src/llm/types.ts 为镜像副本（前端无构建期共享包），增删任务须两处同步
-export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify', 'embed'] as const;
+export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify', 'embed', 'analyze'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
 export const TASK_LABELS: Record<TaskType, string> = {
@@ -8,6 +8,7 @@ export const TASK_LABELS: Record<TaskType, string> = {
   extract: '抽取',
   verify: '核查',
   embed: '向量化',
+  analyze: '爽点评测',
 };
 
 export interface Provider {
@@ -664,6 +665,8 @@ export interface PipelineSettings {
   autoRunLimit: number;
   /** 前文摘要层条数（0=关闭），与 server pipeline/config.ts 为镜像副本 */
   recentSummariesLimit: number;
+  /** 连续压抑预警窗口（章），与 server pipeline/config.ts 为镜像副本 */
+  radarDepressionWindow: number;
 }
 
 export type BatchStopReason = 'limit' | 'suspended' | 'error' | 'precondition' | 'none';
@@ -731,4 +734,61 @@ export interface AuthorProfile {
 export interface AuthorProfileView extends AuthorProfile {
   /** 解析后的文风样本素材（失效引用已过滤） */
   styleSamples: Material[];
+}
+
+// ---- 爽点雷达（与 server/src/radar/store.ts 为镜像副本，增删字段须两处同步） ----
+
+export const THRILL_TYPES = ['face_slap', 'breakthrough', 'reversal', 'gain', 'other'] as const;
+export type ThrillType = (typeof THRILL_TYPES)[number];
+
+export const THRILL_TYPE_LABELS: Record<ThrillType, string> = {
+  face_slap: '打脸',
+  breakthrough: '晋级',
+  reversal: '反转',
+  gain: '获得',
+  other: '其他',
+};
+
+export const HOOK_RATINGS = ['strong', 'medium', 'weak', 'none'] as const;
+export type HookRating = (typeof HOOK_RATINGS)[number];
+
+export const HOOK_RATING_LABELS: Record<HookRating, string> = {
+  strong: '强钩子',
+  medium: '中钩子',
+  weak: '弱钩子',
+  none: '无钩子',
+};
+
+export interface RadarMark {
+  id: number;
+  idx: number;
+  kind: 'thrill' | 'hook';
+  /** thrill：爽点类型；hook：钩子评级 */
+  type: string;
+  quote: string;
+  intensity: number;
+  reason: string;
+  spanStart: number | null;
+  spanEnd: number | null;
+  origin: 'auto' | 'manual';
+}
+
+export interface RadarChapterSummary {
+  idx: number;
+  thrillCount: number;
+  maxIntensity: number;
+  hook: { rating: string; quote: string; reason: string } | null;
+  thrills: RadarMark[];
+}
+
+export interface DepressionWarning {
+  streak: number;
+  window: number;
+  fromIdx: number;
+  toIdx: number;
+}
+
+export interface RadarResponse {
+  items: RadarChapterSummary[];
+  warning: DepressionWarning | null;
 }

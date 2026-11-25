@@ -8,6 +8,7 @@ import {
   getPipelineConfig,
   INTERVENTION_MODES,
   MAX_AUTO_RUN_LIMIT,
+  MAX_RADAR_DEPRESSION_WINDOW,
   MAX_RECENT_SUMMARIES_LIMIT,
   updatePipelineConfig,
 } from '../pipeline/config';
@@ -195,6 +196,12 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
         .int()
         .min(0, '前文摘要条数不能为负（0 为关闭）')
         .max(MAX_RECENT_SUMMARIES_LIMIT, `前文摘要条数最大 ${MAX_RECENT_SUMMARIES_LIMIT}`)
+        .optional(),
+      radarDepressionWindow: z
+        .number()
+        .int()
+        .min(1, '压抑预警窗口至少为 1 章')
+        .max(MAX_RADAR_DEPRESSION_WINDOW, `压抑预警窗口最大 ${MAX_RADAR_DEPRESSION_WINDOW} 章`)
         .optional(),
     })
     .strict()

@@ -222,7 +222,11 @@ async function load() {
     await refreshList();
     await refreshQueue();
     pipelineSettings.value = await api.get<PipelineSettings>('/api/settings/pipeline').catch(() => null);
-    // 选中章仍在则保留；否则选第一已生成章
+    // 选中章仍在则保留；否则按 ?chapter=N 定位（雷达标注页跳转入口），再退回第一已生成章
+    const queryChapter = Number(route.query.chapter);
+    if (selectedIdx.value === null && Number.isInteger(queryChapter) && queryChapter >= 1) {
+      selectedIdx.value = queryChapter;
+    }
     if (selectedIdx.value !== null && chapters.value.some((item) => item.idx === selectedIdx.value)) {
       await select(selectedIdx.value);
     } else {

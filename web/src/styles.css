@@ -1219,3 +1219,20 @@ h3 {
   background: var(--bg);
   font-size: 13px;
 }
+
+/* 爽点雷达明细（T18） */
+.radar-marks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+}
+.radar-marks li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}

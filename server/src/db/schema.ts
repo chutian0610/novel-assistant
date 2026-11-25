@@ -475,4 +475,48 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_doc_embeddings_entity ON doc_embeddings(entity_type, entity_id);
   `,
+
+  // v16：爽点雷达（T18）——① llm_task_routes 任务 CHECK 扩 analyze 并补种子行（表重建手法同上）；
+  // ② 语义标注表 radar_marks（kind=thrill 爽点标注 / hook 章末钩子评级），quote 须正文原文，
+  //    span 由应用层 indexOf 定位（LLM 不负责坐标）；观测与预警维度，不进重写闸门；
+  // ③ pipeline_runs 增 radar_error（雷达回灌与事实回灌同为 commit 旁路，错误分开落盘）；
+  // ④ 连续压抑预警窗口存管线预设键值表，默认 3 章。
+  `
+  CREATE TABLE llm_task_routes_v16 (
+    task TEXT PRIMARY KEY CHECK (task IN ('outline', 'draft', 'extract', 'verify', 'embed', 'analyze')),
+    provider_id INTEGER REFERENCES llm_providers(id) ON DELETE SET NULL,
+    model TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  INSERT INTO llm_task_routes_v16 (task, provider_id, model, enabled, updated_at)
+  SELECT task, provider_id, model, enabled, updated_at FROM llm_task_routes;
+
+  DROP TABLE llm_task_routes;
+  ALTER TABLE llm_task_routes_v16 RENAME TO llm_task_routes;
+
+  INSERT OR IGNORE INTO llm_task_routes (task) VALUES ('analyze');
+
+  ALTER TABLE pipeline_runs ADD COLUMN radar_error TEXT;
+
+  CREATE TABLE radar_marks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    book_id INTEGER NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+    idx INTEGER NOT NULL,
+    kind TEXT NOT NULL CHECK (kind IN ('thrill', 'hook')),
+    type TEXT NOT NULL,
+    quote TEXT NOT NULL DEFAULT '',
+    intensity INTEGER NOT NULL DEFAULT 0,
+    reason TEXT NOT NULL DEFAULT '',
+    span_start INTEGER,
+    span_end INTEGER,
+    origin TEXT NOT NULL DEFAULT 'auto' CHECK (origin IN ('auto', 'manual')),
+    created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  CREATE INDEX idx_radar_marks_chapter ON radar_marks(book_id, idx);
+
+  INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('radar_depression_window', '3');
+  `,
 ];
