@@ -182,6 +182,8 @@ onMounted(load);
                 <span class="chip chip-static">{{ REF_TYPE_LABELS[item.refType] }}</span>
                 <span v-if="item.sourceChapter !== null" class="chip chip-static">第{{ item.sourceChapter }}章</span>
                 <span v-if="item.rank !== undefined" class="chip chip-static">相关度 #{{ item.rank }}</span>
+                <span v-if="item.bm25Rank !== undefined" class="chip chip-static">BM25 #{{ item.bm25Rank }}</span>
+                <span v-if="item.vectorRank !== undefined" class="chip chip-static">向量 #{{ item.vectorRank }}</span>
                 <span class="pack-item-tokens muted small">{{ item.tokens }} tok</span>
               </div>
               <p class="pack-item-text">{{ item.text }}</p>

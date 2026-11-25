@@ -341,8 +341,12 @@ export interface PackingItem {
   tokens: number;
   /** 出处章节号；null 表示该条目无章节维度 */
   sourceChapter: number | null;
-  /** 相关度名次（1 = 最相关）；仅相关性层条目携带 */
+  /** 相关度名次（1 = 最相关；混合装填时为融合名次，降级时即 BM25 名次）；仅相关性层条目携带 */
   rank?: number;
+  /** BM25 单路名次（仅向量路参与装填时携带，T17） */
+  bm25Rank?: number;
+  /** 向量余弦单路名次（仅向量路参与装填时携带，T17） */
+  vectorRank?: number;
 }
 
 export interface PackingLayer {
