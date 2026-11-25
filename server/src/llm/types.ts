@@ -3,7 +3,7 @@
  * 注意：web/src/types.ts 有一份镜像副本（前端无构建期共享包），增删任务时须两处同步，
  * 并同步更新 server/src/db/schema.ts 的 CHECK 约束与种子行。
  */
-export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify', 'embed'] as const;
+export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify', 'embed', 'analyze'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
 export interface ChatMessage {

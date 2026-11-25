@@ -179,7 +179,7 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
     } catch (cause) {
       message = `事实回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
     }
-    return c.json({ run: settleFactSync(db, bookId, idx, run.attempts, message), facts });
+    return c.json({ run: settleFactSync(db, bookId, idx, run.attempts, message, run.radarError), facts });
   });
 
   app.post('/books/:id/chapters/:idx/revert', async (c) => {

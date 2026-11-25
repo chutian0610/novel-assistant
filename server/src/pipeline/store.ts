@@ -70,6 +70,8 @@ export interface PipelineRunRecord {
   semanticReport: SemanticReport | null;
   /** 落稿后事实回灌的失败信息（null = 已回灌或无需回灌）；失败不阻塞提交，可手动重灌 */
   extractError: string | null;
+  /** 落稿后爽点雷达回灌的失败信息（T18，语义同 extractError，旁路分开落盘） */
+  radarError: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -110,6 +112,7 @@ interface RunRow {
   detection_report: string | null;
   semantic_report: string | null;
   extract_error: string | null;
+  radar_error: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -152,6 +155,7 @@ function toRunRecord(row: RunRow): PipelineRunRecord {
     detectionReport: parseJson(row.detection_report) as DetectionReport | null,
     semanticReport: parseJson(row.semantic_report) as SemanticReport | null,
     extractError: row.extract_error,
+    radarError: row.radar_error,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   };
@@ -202,6 +206,8 @@ export interface RunStagePatch {
   semanticReport?: SemanticReport | null;
   /** 传入则覆写事实回灌失败信息 */
   extractError?: string | null;
+  /** 传入则覆写爽点雷达回灌失败信息（T18） */
+  radarError?: string | null;
 }
 
 /** 运行状态推进统一入口：每次阶段执行（成功或失败）恰好调用一次、attempts 由调用方累计；
@@ -218,6 +224,7 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
     patch.detectionReport !== undefined ? 'detection_report = ?' : null,
     patch.semanticReport !== undefined ? 'semantic_report = ?' : null,
     patch.extractError !== undefined ? 'extract_error = ?' : null,
+    patch.radarError !== undefined ? 'radar_error = ?' : null,
     `updated_at = ${NOW}`,
   ].filter((item): item is string => item !== null);
   const values: (string | number | null)[] = [
@@ -243,6 +250,9 @@ export function advanceRun(db: DB, bookId: number, idx: number, patch: RunStageP
   }
   if (patch.extractError !== undefined) {
     values.push(patch.extractError);
+  }
+  if (patch.radarError !== undefined) {
+    values.push(patch.radarError);
   }
   values.push(bookId, idx);
   db.prepare(`UPDATE pipeline_runs SET ${assignments.join(', ')} WHERE book_id = ? AND idx = ?`).run(...values);
@@ -433,6 +443,7 @@ export interface CompactRun {
   fixRounds: number;
   error: string | null;
   extractError: string | null;
+  radarError: string | null;
 }
 
 export function toCompactRun(run: PipelineRunRecord): CompactRun {
@@ -443,6 +454,7 @@ export function toCompactRun(run: PipelineRunRecord): CompactRun {
     fixRounds: run.fixRounds,
     error: run.error,
     extractError: run.extractError,
+    radarError: run.radarError,
   };
 }
 

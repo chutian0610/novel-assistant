@@ -20,10 +20,15 @@ export const MAX_AUTO_RUN_LIMIT = 20;
 export const DEFAULT_RECENT_SUMMARIES_LIMIT = 3;
 export const MAX_RECENT_SUMMARIES_LIMIT = 10;
 
+/** 连续压抑预警窗口（T18）：连续 N 章无爽点触发预警，默认 3 */
+export const DEFAULT_RADAR_DEPRESSION_WINDOW = 3;
+export const MAX_RADAR_DEPRESSION_WINDOW = 20;
+
 export interface PipelineConfig {
   mode: InterventionMode;
   autoRunLimit: number;
   recentSummariesLimit: number;
+  radarDepressionWindow: number;
 }
 
 interface ConfigRow {
@@ -34,6 +39,7 @@ interface ConfigRow {
 const MODE_KEY = 'mode';
 const LIMIT_KEY = 'auto_run_limit';
 const RECENT_SUMMARIES_KEY = 'recent_summaries_limit';
+const RADAR_WINDOW_KEY = 'radar_depression_window';
 
 /** 读管线预设：表值合并进默认结构（缺键回退默认，脏值/脏键忽略） */
 export function getPipelineConfig(db: DB): PipelineConfig {
@@ -42,6 +48,7 @@ export function getPipelineConfig(db: DB): PipelineConfig {
     mode: 'collaborative',
     autoRunLimit: DEFAULT_AUTO_RUN_LIMIT,
     recentSummariesLimit: DEFAULT_RECENT_SUMMARIES_LIMIT,
+    radarDepressionWindow: DEFAULT_RADAR_DEPRESSION_WINDOW,
   };
   for (const row of rows) {
     if (row.key === MODE_KEY && INTERVENTION_MODES.includes(row.value as InterventionMode)) {
@@ -57,6 +64,12 @@ export function getPipelineConfig(db: DB): PipelineConfig {
       const limit = Number(row.value);
       if (Number.isInteger(limit) && limit >= 0 && limit <= MAX_RECENT_SUMMARIES_LIMIT) {
         config.recentSummariesLimit = limit;
+      }
+    }
+    if (row.key === RADAR_WINDOW_KEY) {
+      const limit = Number(row.value);
+      if (Number.isInteger(limit) && limit >= 1 && limit <= MAX_RADAR_DEPRESSION_WINDOW) {
+        config.radarDepressionWindow = limit;
       }
     }
   }
@@ -85,6 +98,14 @@ export function updatePipelineConfig(db: DB, patch: Partial<PipelineConfig>): Pi
       patch.recentSummariesLimit <= MAX_RECENT_SUMMARIES_LIMIT
     ) {
       update.run(String(patch.recentSummariesLimit), RECENT_SUMMARIES_KEY);
+    }
+    if (
+      patch.radarDepressionWindow !== undefined &&
+      Number.isInteger(patch.radarDepressionWindow) &&
+      patch.radarDepressionWindow >= 1 &&
+      patch.radarDepressionWindow <= MAX_RADAR_DEPRESSION_WINDOW
+    ) {
+      update.run(String(patch.radarDepressionWindow), RADAR_WINDOW_KEY);
     }
   });
   run();
