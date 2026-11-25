@@ -2,7 +2,7 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { RouterLink, useRoute } from 'vue-router';
 import { api, errorMessage } from '../api';
-import type { Book, ChapterMetrics, ChapterMetricsResponse, MetricKey, RadarResponse, ThrillType } from '../types';
+import type { Book, ChapterMetrics, ChapterMetricsResponse, MetricKey, PipelineSettings, RadarResponse, SimilarityReport, ThrillType } from '../types';
 import { HOOK_RATING_LABELS, METRIC_KEY_LABELS, METRIC_KEYS, THRILL_TYPE_LABELS } from '../types';
 
 const route = useRoute();
@@ -18,6 +18,13 @@ const radar = ref<RadarResponse | null>(null);
 const radarLoadError = ref<string | null>(null);
 const resyncingIdx = ref<number | null>(null);
 const resyncError = ref<string | null>(null);
+
+// 跨章情节自相似（T20）：纯向量扫描，无向量/无路由时整体空态
+const similarity = ref<SimilarityReport | null>(null);
+const pipelineSettings = ref<PipelineSettings | null>(null);
+const excludeWindow = computed(() => pipelineSettings.value?.similarityExcludeWindow ?? 5);
+const threshold = computed(() => pipelineSettings.value?.similarityThreshold ?? 0.85);
+const topK = computed(() => pipelineSettings.value?.similarityTopK ?? 20);
 
 /** 手动重灌单章爽点评测（analyze 路由未配置或失败时错误就地显示） */
 async function resyncRadar(idx: number) {
@@ -88,6 +95,8 @@ async function load() {
       radar.value = null;
       radarLoadError.value = errorMessage(cause);
     }
+    similarity.value = await api.get<SimilarityReport>(`/api/books/${id}/similarity`).catch(() => null);
+    pipelineSettings.value = await api.get<PipelineSettings>('/api/settings/pipeline').catch(() => null);
   } catch (cause) {
     loadError.value = errorMessage(cause);
   } finally {
@@ -225,6 +234,50 @@ onMounted(load);
                         <span class="muted small">{{ thrill.reason }}</span>
                       </li>
                     </ul>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </template>
+      </section>
+
+      <section class="panel">
+        <div class="panel-head">
+          <h2>跨章情节自相似</h2>
+          <span class="muted small">
+            全书段落两两比对（排除相邻 {{ excludeWindow }} 章、阈值 {{ threshold }}、最多 {{ topK }} 对，均可在设置调整）
+            · 点章号去写作台定位
+          </span>
+        </div>
+        <div v-if="!similarity || similarity.model === null || similarity.scannedBlocks === 0" class="empty muted">
+          还没有可扫描的正文向量。配置「向量化」任务路由并生成（或重建索引）后，这里会报告跨章雷同的段落对——桥段自我复读的第一双眼睛。
+        </div>
+        <template v-else>
+          <p v-if="similarity.items.length === 0" class="muted small">
+            已扫描 {{ similarity.scannedChapters }} 章 {{ similarity.scannedBlocks }} 块：未发现超过阈值的跨章雷同段落。
+          </p>
+          <div v-else class="metrics-table-wrap">
+            <table class="detector-table metrics-table">
+              <thead>
+                <tr>
+                  <th>相似度</th>
+                  <th>位置 A</th>
+                  <th>位置 B</th>
+                  <th>段摘（A / B）</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(pair, index) in similarity.items" :key="index">
+                  <td>{{ pair.similarity.toFixed(2) }}</td>
+                  <td>
+                    <RouterLink :to="`/books/${bookId}/writing?chapter=${pair.aIdx}`" class="small">第{{ pair.aIdx }}章·块{{ pair.aChunk }}</RouterLink>
+                  </td>
+                  <td>
+                    <RouterLink :to="`/books/${bookId}/writing?chapter=${pair.bIdx}`" class="small">第{{ pair.bIdx }}章·块{{ pair.bChunk }}</RouterLink>
+                  </td>
+                  <td class="muted small">
+                    「{{ pair.aExcerpt }}……」<br />「{{ pair.bExcerpt }}……」
                   </td>
                 </tr>
               </tbody>
