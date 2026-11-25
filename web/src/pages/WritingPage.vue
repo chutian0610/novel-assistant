@@ -9,6 +9,7 @@ import type {
   ChapterDetail,
   ChapterListItem,
   ChapterListResponse,
+  EchoSearchResponse,
   GenerateResult,
   OutlineTree,
   PipelineRun,
@@ -35,6 +36,45 @@ const detail = ref<ChapterDetail | null>(null);
 const selectedIdx = ref<number | null>(null);
 /** 正文编辑缓冲：打开章节时装载，保存后与详情同步 */
 const editorContent = ref('');
+const editorEl = ref<HTMLTextAreaElement | null>(null);
+
+// 呼应旧章（T21）：选中段/手输一句话 → 全书相似旧段 top-K → 点击切章定位
+const echoQuery = ref('');
+const echoResults = ref<EchoSearchResponse | null>(null);
+const echoSearching = ref(false);
+const echoError = ref<string | null>(null);
+
+/** 用编辑器里选中的文本作为查询；无选中则取光标所在段落 */
+function useSelectionAsQuery() {
+  const editor = editorEl.value;
+  if (!editor) return;
+  const { selectionStart, selectionEnd, value } = editor;
+  let picked = value.slice(selectionStart, selectionEnd).trim();
+  if (picked === '') {
+    // 无选中：取光标所在段（前后空行之间）
+    const start = value.lastIndexOf('\n\n', Math.max(0, selectionStart - 1)) + 2;
+    const nextBreak = value.indexOf('\n\n', selectionStart);
+    picked = value.slice(start, nextBreak === -1 ? value.length : nextBreak).trim();
+  }
+  echoQuery.value = picked.slice(0, 2000);
+}
+
+async function searchEcho() {
+  if (echoQuery.value.trim() === '' || echoSearching.value) return;
+  echoSearching.value = true;
+  echoError.value = null;
+  try {
+    echoResults.value = await api.post<EchoSearchResponse>(`/api/books/${bookId.value}/chapter-blocks/search`, {
+      query: echoQuery.value,
+      excludeIdx: selectedIdx.value ?? undefined,
+    });
+  } catch (cause) {
+    echoResults.value = null;
+    echoError.value = errorMessage(cause);
+  } finally {
+    echoSearching.value = false;
+  }
+}
 
 const loading = ref(true);
 const loadError = ref<string | null>(null);
@@ -370,7 +410,7 @@ onMounted(load);
             {{ detailRun.extractError }}（章节已提交，事实面板缺本章数据时事实库可能滞后）
             <button class="btn btn-ghost small" type="button" @click="resyncFacts">重新回灌</button>
           </p>
-          <textarea v-model="editorContent" class="input writing-editor" rows="16" spellcheck="false"></textarea>
+          <textarea ref="editorEl" v-model="editorContent" class="input writing-editor" rows="16" spellcheck="false"></textarea>
           <div class="writing-editor-foot">
             <span class="muted small">
               {{ editorDirty ? '有未保存修改' : '与已保存版本一致' }} · 保存会生成「人工编辑」快照，滚动摘要同步重算
@@ -379,6 +419,39 @@ onMounted(load);
               {{ saving ? '保存中……' : '保存正文' }}
             </button>
           </div>
+          <p v-if="actionError" class="error-text">{{ actionError }}</p>
+
+          <!-- 呼应旧章（T21）：语义检索全书相似旧段 -->
+          <div class="echo-panel">
+            <div class="echo-panel-head">
+              <strong class="small">呼应旧章</strong>
+              <button class="btn btn-ghost small" type="button" @click="useSelectionAsQuery">用选中段</button>
+            </div>
+            <div class="echo-input-row">
+              <input
+                v-model="echoQuery"
+                class="input"
+                type="text"
+                placeholder="输入一句话或点「用选中段」，搜全书相似旧段……"
+                @keydown.enter="searchEcho"
+              />
+              <button class="btn" type="button" :disabled="echoSearching || echoQuery.trim() === ''" @click="searchEcho">
+                {{ echoSearching ? '检索中……' : '检索' }}
+              </button>
+            </div>
+            <p v-if="echoError" class="error-text small">{{ echoError }}</p>
+            <ul v-else-if="echoResults && echoResults.items.length > 0" class="echo-results">
+              <li v-for="(item, index) in echoResults.items" :key="`${item.idx}-${item.chunk}-${index}`">
+                <button class="btn btn-ghost small echo-result-link" type="button" @click="select(item.idx)">
+                  第{{ item.idx }}章·块{{ item.chunk }}
+                </button>
+                <span class="muted small">{{ (item.similarity * 100).toFixed(0) }}%</span>
+                <span class="muted small echo-excerpt">「{{ item.excerpt }}{{ item.excerpt.length >= 40 ? '……' : '' }}」</span>
+              </li>
+            </ul>
+            <p v-else-if="echoResults" class="muted small">没有找到相似旧段（全书向量已扫完）。</p>
+          </div>
+
           <p v-if="actionError" class="error-text">{{ actionError }}</p>
         </section>
 

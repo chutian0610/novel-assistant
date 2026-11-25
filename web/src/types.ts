@@ -817,3 +817,17 @@ export interface SimilarityReport {
   scannedBlocks: number;
   model: string | null;
 }
+
+// ---- 呼应检索（与 server/src/chapterblocks/similarity.ts 为镜像副本，增删字段须两处同步） ----
+
+export interface EchoSearchItem {
+  idx: number;
+  chunk: number;
+  excerpt: string;
+  similarity: number;
+}
+
+export interface EchoSearchResponse {
+  model: string;
+  items: EchoSearchItem[];
+}
