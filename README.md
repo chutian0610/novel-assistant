@@ -41,17 +41,34 @@ npm run typecheck  # 服务端 tsc + 前端 vue-tsc
 ## 目录结构
 
 ```
-server/          # Node 后端（Hono + SQLite）
-  src/db/        #   SQLite 接入与迁移
-  src/llm/       #   LLMProvider 适配层（resolver / openai 出口 / FakeLLM）
-  src/api/       #   HTTP 路由（health / settings）
-  src/index.ts   #   入口：启动服务，生产模式托管 web/dist
-  test/          #   supertest + 真实 SQLite 临时库 + 架构纪律测试
-web/             # Vue 3 前端
-  src/pages/     #   页面（当前：设置页）
+server/              # Node 后端（Hono + SQLite）
+  src/api/           #   HTTP 路由（15 组，挂载见 src/app.ts）
+  src/<域>/          #   业务领域模块：materials / books / facts / outlines / pipeline /
+                     #   detectors / radar / embeddings / packing / references /
+                     #   chapterblocks / export / profile / lang
+  src/llm/           #   LLMProvider 接缝（代码中唯一 LLM 出口）
+  src/db/            #   SQLite 接入与只追加迁移
+  src/index.ts       #   入口：启动服务，生产模式托管 web/dist
+  test/              #   supertest + 真实 SQLite 临时库 + 架构纪律测试
+web/                 # Vue 3 前端
+  src/pages/         #   页面（13 个：书架 / 写作台 / 大纲 / 事实 / 报告 / 拆书 / 素材 / 设置等）
   src/components/
-data/            # 运行时 SQLite 数据（gitignore，不入仓库）
+  src/api.ts         #   通用请求薄封装
+docs/                # 文档体系（见下「文档」一节）
+data/                # 运行时 SQLite 数据（gitignore，不入仓库）
 ```
+
+## 文档
+
+| 文档 | 内容 |
+| --- | --- |
+| [CONTEXT.md](CONTEXT.md) | 领域术语表（素材 / 事实 / 管线 / 爽点雷达等词条，含 Avoid 词约定） |
+| [docs/architecture.md](docs/architecture.md) | 架构总览：模块地图、章节管线数据流、LLM 接缝、检索与向量、数据模型 |
+| [docs/api.md](docs/api.md) | API 参考：全部 HTTP 端点速查与通用约定 |
+| [docs/dev-guide.md](docs/dev-guide.md) | 开发指南：分层约定、测试范式、常见改动怎么落、同步纪律 |
+| [docs/adr/](docs/adr/) | 架构决策记录（可配置混合管线 / 结构化事实库 / 从零自建 / Hono 选型） |
+| [docs/agents/](docs/agents/) | Agent 协作约定（issue 工单 / triage 标签 / 领域文档消费方式） |
+| [docs/research/](docs/research/) | 立项调研存档（开源 AI 写作项目横评） |
 
 ## 常用命令
 
