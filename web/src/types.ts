@@ -1,5 +1,5 @@
 // 任务类型：与 server/src/llm/types.ts 为镜像副本（前端无构建期共享包），增删任务须两处同步
-export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify'] as const;
+export const TASK_TYPES = ['outline', 'draft', 'extract', 'verify', 'embed'] as const;
 export type TaskType = (typeof TASK_TYPES)[number];
 
 export const TASK_LABELS: Record<TaskType, string> = {
@@ -7,6 +7,7 @@ export const TASK_LABELS: Record<TaskType, string> = {
   draft: '正文',
   extract: '抽取',
   verify: '核查',
+  embed: '向量化',
 };
 
 export interface Provider {

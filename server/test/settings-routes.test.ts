@@ -1,11 +1,11 @@
 import { expect, it } from 'vitest';
 import { createTestApp, seedProvider } from './helpers';
 
-it('路由初始为四个任务、均未指派', async () => {
+it('路由初始为五个任务、均未指派', async () => {
   const { request } = createTestApp();
   const res = await request.get('/api/settings/routes');
   expect(res.status).toBe(200);
-  expect(res.body.map((r: { task: string }) => r.task)).toEqual(['outline', 'draft', 'extract', 'verify']);
+  expect(res.body.map((r: { task: string }) => r.task)).toEqual(['outline', 'draft', 'extract', 'verify', 'embed']);
   for (const route of res.body as { providerId: unknown; providerName: unknown; effectiveModel: unknown; enabled: unknown }[]) {
     expect(route).toMatchObject({ providerId: null, providerName: null, effectiveModel: null, enabled: true });
   }

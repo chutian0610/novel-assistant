@@ -90,14 +90,14 @@ async function remove(provider: Provider) {
       <h3>{{ editingId === null ? '新增供应商' : '编辑供应商' }}</h3>
       <div class="form-grid">
         <label>名称<input v-model="form.name" class="input" type="text" placeholder="如：DeepSeek / 本地 Ollama" /></label>
-        <label>Base URL<input v-model="form.baseUrl" class="input" type="text" placeholder="如：https://api.deepseek.com/v1" /></label>
+        <label>Base URL<input v-model="form.baseUrl" class="input" type="text" placeholder="如：https://api.deepseek.com/v1 或 http://localhost:11434/v1（ollama）" /></label>
         <label>API Key
           <div class="key-row">
             <input v-model="form.apiKey" class="input" :type="showKey ? 'text' : 'password'" placeholder="本地服务可为空" />
             <button class="btn btn-ghost" type="button" @click="showKey = !showKey">{{ showKey ? '隐藏' : '显示' }}</button>
           </div>
         </label>
-        <label>默认模型<input v-model="form.model" class="input" type="text" placeholder="如：deepseek-chat" /></label>
+        <label>默认模型<input v-model="form.model" class="input" type="text" placeholder="如：deepseek-chat / bge-m3（ollama 嵌入）" /></label>
         <label class="checkbox-label"><input v-model="form.enabled" type="checkbox" /> 启用该供应商</label>
       </div>
       <p v-if="formError" class="error-text">{{ formError }}</p>

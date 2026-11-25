@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { z } from 'zod';
 import type { DB } from '../db/open';
 import { resolveRoute } from '../llm/resolver';
-import { PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
+import { EMBED_PROBE_TEXT, PROBE_REQUEST, TASK_TYPES, type LLMProvider, type TaskType } from '../llm/types';
 import { getMaterial } from '../materials/store';
 import {
   getPipelineConfig,
@@ -164,7 +164,12 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
     let ok = true;
     let error: string | undefined;
     try {
-      await llm.complete(task, PROBE_REQUEST);
+      // embed 任务打 /embeddings 探测（chat 探测对纯嵌入服务会失败）
+      if (task === 'embed') {
+        await llm.embed({ texts: [EMBED_PROBE_TEXT] });
+      } else {
+        await llm.complete(task, PROBE_REQUEST);
+      }
     } catch (cause) {
       ok = false;
       error = cause instanceof Error ? cause.message : String(cause);

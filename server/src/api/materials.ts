@@ -1,6 +1,8 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { DB } from '../db/open';
+import { embedRouteModel, reindexMaterialEmbeddings, syncMaterialEmbedding } from '../embeddings/store';
+import type { LLMProvider } from '../llm/types';
 import {
   MATERIAL_TYPES,
   PAYLOAD_FIELDS,
@@ -89,9 +91,9 @@ const materialFields = {
   source: sourceSchema,
 };
 
-/** 设置模块之外的第二组路由：素材库 + 标签聚合 */
-export function materialsRoutes(deps: { db: DB }) {
-  const { db } = deps;
+/** 设置模块之外的第二组路由：素材库 + 标签聚合（llm 供写路径同步向量索引，T16） */
+export function materialsRoutes(deps: { db: DB; llm: LLMProvider }) {
+  const { db, llm } = deps;
   const app = new Hono();
 
   app.get('/materials', (c) => {
@@ -125,6 +127,8 @@ export function materialsRoutes(deps: { db: DB }) {
       tags: data.tags,
       source: data.source,
     });
+    // 同步增量向量索引：embed 路由未配置或嵌入失败都不阻塞素材入库（T16）
+    await syncMaterialEmbedding(db, llm, record);
     return c.json(toMaterialJson(record), 201);
   });
 
@@ -167,7 +171,18 @@ export function materialsRoutes(deps: { db: DB }) {
       ...(payload === undefined ? {} : { payload }),
     });
     if (!record) throw new HttpError(404, `素材 ${id} 不存在`);
+    // 内容变更后重嵌（同步增量；失败不阻塞更新）
+    await syncMaterialEmbedding(db, llm, record);
     return c.json(toMaterialJson(record));
+  });
+
+  // 批量重建向量索引：补齐缺当前模型向量的素材（首次开启 embed / 换嵌入模型 / 失败补跑）
+  app.post('/materials/embeddings/reindex', async (c) => {
+    if (!embedRouteModel(db)) {
+      throw new HttpError(409, '尚未配置 embed 模型路由，无法建立向量索引');
+    }
+    const outcome = await reindexMaterialEmbeddings(db, llm);
+    return c.json(outcome);
   });
 
   app.delete('/materials/:id', (c) => {

@@ -21,6 +21,32 @@ const loadError = ref<string | null>(null);
 const editorVisible = ref(false);
 const editing = ref<Material | null>(null);
 
+// 向量索引重建（T16）：补齐缺当前嵌入模型向量的素材（首次开启 / 换模型 / 失败补跑）
+const reindexing = ref(false);
+const reindexResult = ref<string | null>(null);
+
+interface ReindexOutcome {
+  model: string;
+  indexed: number;
+  failed: { id: number; title: string; error: string }[];
+}
+
+async function reindexEmbeddings() {
+  reindexing.value = true;
+  reindexResult.value = null;
+  try {
+    const outcome = await api.post<ReindexOutcome>('/api/materials/embeddings/reindex', {});
+    reindexResult.value =
+      outcome.failed.length > 0
+        ? `已索引 ${outcome.indexed} 条，失败 ${outcome.failed.length} 条（如：${outcome.failed[0]!.title}）`
+        : `已索引 ${outcome.indexed} 条，全部就绪`;
+  } catch (cause) {
+    reindexResult.value = errorMessage(cause);
+  } finally {
+    reindexing.value = false;
+  }
+}
+
 async function reloadTags() {
   try {
     tags.value = await api.get<TagCount[]>('/api/tags');
@@ -107,8 +133,12 @@ onMounted(async () => {
           @keydown.enter="search"
         />
         <button class="btn" type="button" @click="search">搜索</button>
+        <button class="btn" type="button" :disabled="reindexing" @click="reindexEmbeddings">
+          {{ reindexing ? '重建中……' : '重建向量索引' }}
+        </button>
         <button class="btn btn-primary filter-create" type="button" @click="openCreate">新增素材</button>
       </div>
+      <p v-if="reindexResult" class="muted small">{{ reindexResult }}</p>
     </section>
 
     <section class="panel">
