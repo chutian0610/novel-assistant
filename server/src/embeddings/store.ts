@@ -1,18 +1,23 @@
 import type { DB } from '../db/open';
+import { splitChapterBlocks } from '../chapterblocks/blocks';
 import { resolveRoute } from '../llm/resolver';
 import type { LLMProvider } from '../llm/types';
+import { getChapter, getChapterId, listChapters } from '../pipeline/store';
 import { getMaterial, type MaterialRecord } from '../materials/store';
 
 /**
  * 向量索引（T16，ADR-0002：embedding 只是装填排序的增强，不是一致性的数据源）。
+ * doc_embeddings 的唯一访问层：entity_type = material（素材全局内容）| chapter_block（正文章块，T19）。
  *
  * 关键决策：
  * - 索引对象是素材的**全局内容**（与 FTS 同口径：检索走全局索引，注入用书内覆写后的生效内容）。
  * - 向量 L2 归一化后落 BLOB（Float32Array），余弦退化为点积；维度从嵌入服务响应读取
  *   （ollama 本地模型 768/1024 各不相同，不手动配置）。
  * - model 进行：不同嵌入模型的向量永不混比；换模型后旧行成为 stale，由 reindex 补齐。
- * - embedding 失败不阻塞素材写路径：索引失败只返回错误信息，素材照常入库；
- *   查询侧（T17 混合排序）只对有当前 model 向量的素材生效，自动跳过缺失项。
+ * - embedding 失败不阻塞写路径：索引失败只返回错误信息，素材照常入库 / 章节照常提交；
+ *   查询侧只对有当前 model 向量的条目生效，自动跳过缺失项。
+ * - 级联为应用层 hook（v17 起 doc_embeddings 无外键）：素材删除（materials API）、
+ *   删书（books API）、章节重灌整章替换（本模块 replace 语义）。
  */
 
 /** 重索引时每批送入 /embeddings 的文本数（控制单请求体积） */
@@ -168,6 +173,109 @@ export async function reindexMaterialEmbeddings(db: DB, llm: LLMProvider): Promi
       for (const item of batch) {
         if (texts.has(item.id)) failed.push({ id: item.id, title: item.title, error });
       }
+    }
+  }
+  return { model, indexed, failed };
+}
+
+// ---------- 正文块向量（T19） ----------
+
+export interface ChapterBlockSyncResult extends EmbeddingSyncResult {
+  /** 本次写入的块数（路由未配置或失败时为 0） */
+  blocks: number;
+}
+
+/** 删书时的正文块向量清理（应用层级联：doc_embeddings 已无外键） */
+export function deleteChapterBlockEmbeddingsByBook(db: DB, bookId: number): void {
+  db.prepare(
+    `DELETE FROM doc_embeddings WHERE entity_type = 'chapter_block'
+     AND entity_id IN (SELECT id FROM chapters WHERE book_id = ?)`
+  ).run(bookId);
+}
+
+/** 素材删除时的向量清理（应用层级联，替代 v15 外键；由素材删除路由调用） */
+export function deleteMaterialEmbeddings(db: DB, materialId: number): void {
+  db.prepare(`DELETE FROM doc_embeddings WHERE entity_type = 'material' AND entity_id = ?`).run(materialId);
+}
+
+function hasChapterBlockEmbeddings(db: DB, chapterId: number, model: string): boolean {
+  const row = db
+    .prepare(`SELECT id FROM doc_embeddings WHERE entity_type = 'chapter_block' AND entity_id = ? AND model = ? LIMIT 1`)
+    .get(chapterId, model);
+  return row !== undefined;
+}
+
+function replaceChapterBlockRows(db: DB, chapterId: number, model: string, vectors: number[][]): void {
+  const insert = db.prepare(
+    `INSERT INTO doc_embeddings (entity_type, entity_id, chunk_index, vector, model, dim)
+     VALUES ('chapter_block', ?, ?, ?, ?, ?)
+     ON CONFLICT (entity_type, entity_id, chunk_index)
+     DO UPDATE SET vector = excluded.vector, model = excluded.model, dim = excluded.dim,
+                   updated_at = strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`
+  );
+  const run = db.transaction(() => {
+    db.prepare(`DELETE FROM doc_embeddings WHERE entity_type = 'chapter_block' AND entity_id = ?`).run(chapterId);
+    vectors.forEach((vector, chunkIndex) => {
+      const normalized = normalize(vector);
+      insert.run(chapterId, chunkIndex, vectorToBlob(normalized), model, normalized.length);
+    });
+  });
+  run();
+}
+
+/**
+ * 单章正文块向量回灌（T19）：切块 → 批量嵌入 → 整章替换。
+ * commit 旁路与人工编辑路径共用；失败静默语义由返回值表达，调用方 catch 兜底即可。
+ */
+export async function syncChapterBlockEmbeddings(db: DB, llm: LLMProvider, bookId: number, idx: number): Promise<ChapterBlockSyncResult> {
+  const model = embedRouteModel(db);
+  if (!model) return { ok: false, error: 'embed 路由未配置', blocks: 0 };
+  const chapterId = getChapterId(db, bookId, idx);
+  const chapter = chapterId === null ? null : getChapter(db, bookId, idx);
+  if (chapterId === null || !chapter) return { ok: false, error: `书 ${bookId} 还没有第 ${idx} 章`, blocks: 0 };
+
+  const blocks = splitChapterBlocks(chapter.content);
+  if (blocks.length === 0) {
+    replaceChapterBlockRows(db, chapterId, model, []);
+    return { ok: true, model, blocks: 0 };
+  }
+  try {
+    const vectors: number[][] = [];
+    for (let start = 0; start < blocks.length; start += EMBED_BATCH_SIZE) {
+      const batch = blocks.slice(start, start + EMBED_BATCH_SIZE).map((block) => block.text);
+      const result = await llm.embed({ texts: batch });
+      if (result.vectors.length !== batch.length) return { ok: false, error: '嵌入服务返回向量条数不足', blocks: 0 };
+      vectors.push(...result.vectors);
+    }
+    replaceChapterBlockRows(db, chapterId, model, vectors);
+    return { ok: true, model, blocks: blocks.length };
+  } catch (cause) {
+    return { ok: false, error: cause instanceof Error ? cause.message : String(cause), blocks: 0 };
+  }
+}
+
+export interface ChapterBlockReindexOutcome {
+  model: string;
+  /** 重建的章数 */
+  indexed: number;
+  failed: { idx: number; title: string; error: string }[];
+}
+
+/** 书级重建正文索引：对缺当前模型向量的章逐章重灌（换模型 stale / 失败补跑） */
+export async function reindexChapterBlockEmbeddings(db: DB, llm: LLMProvider, bookId: number): Promise<ChapterBlockReindexOutcome> {
+  const model = embedRouteModel(db);
+  if (!model) throw new Error('embed 路由未配置（应由 API 层先映射 409）');
+
+  const chapters = listChapters(db, bookId);
+  let indexed = 0;
+  const failed: ChapterBlockReindexOutcome['failed'] = [];
+  for (const chapter of chapters) {
+    if (hasChapterBlockEmbeddings(db, getChapterId(db, bookId, chapter.idx) ?? -1, model)) continue;
+    const result = await syncChapterBlockEmbeddings(db, llm, bookId, chapter.idx);
+    if (result.ok) {
+      indexed += 1;
+    } else {
+      failed.push({ idx: chapter.idx, title: chapter.title, error: result.error ?? '未知错误' });
     }
   }
   return { model, indexed, failed };

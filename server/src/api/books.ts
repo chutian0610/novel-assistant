@@ -16,6 +16,7 @@ import {
   type MaterialOverrides,
 } from '../books/store';
 import type { DB } from '../db/open';
+import { deleteChapterBlockEmbeddingsByBook } from '../embeddings/store';
 import { getMaterial } from '../materials/store';
 import { HttpError } from './errors';
 import { parseMaterialFieldPatch } from './material-patch';
@@ -88,6 +89,8 @@ export function booksRoutes(deps: { db: DB }) {
   app.delete('/books/:id', (c) => {
     const id = parseId(c.req.param('id'));
     if (!deleteBook(db, id)) throw new HttpError(404, `书 ${id} 不存在`);
+    // 正文块向量随书清理（应用层级联，v17 起无外键）
+    deleteChapterBlockEmbeddingsByBook(db, id);
     return c.body(null, 204);
   });
 

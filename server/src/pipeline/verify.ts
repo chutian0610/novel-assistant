@@ -10,6 +10,7 @@ import {
 import type { DB } from '../db/open';
 import { extractFacts } from '../facts/extract-facts';
 import { analyzeChapter } from '../radar/analyze';
+import { syncChapterBlockEmbeddings } from '../embeddings/store';
 import { listCharacterRelations, listCharacterStates, listForeshadows, listTimelineEvents } from '../facts/store';
 import { RouteNotConfiguredError } from '../llm/routed';
 import { resolveRoute } from '../llm/resolver';
@@ -454,6 +455,12 @@ export async function commitWithFactSync(db: DB, llm: LLMProvider, bookId: numbe
     await analyzeChapter(db, llm, bookId, idx);
   } catch (cause) {
     radarMessage = `爽点回灌失败：${cause instanceof Error ? cause.message : String(cause)}`;
+  }
+  // 正文块向量（T19）：第三旁路，失败静默——块缺失只影响呼应检索与查重，无错误列
+  try {
+    await syncChapterBlockEmbeddings(db, llm, bookId, idx);
+  } catch {
+    // 静默跳过（路由未配置或嵌入失败，查询侧自动缺席）
   }
   return {
     ...outcome,
