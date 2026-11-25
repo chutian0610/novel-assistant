@@ -438,4 +438,41 @@ export const MIGRATIONS: readonly string[] = [
   `
   INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('recent_summaries_limit', '3');
   `,
+
+  // v15：混合装填（T16）——① llm_task_routes 任务 CHECK 扩 embed 并补种子行（SQLite 不能
+  // 改 CHECK，沿袭 v5/v10 的表重建手法，旧行原样搬入）；② 通用向量表 doc_embeddings
+  // （ADR-0002：向量只是排序增强、不是一致性数据源；entity_type 预留 chapter_block 供
+  // 正文向量语义呼应的后续增强，schema 零迁移扩展）。向量存归一化 Float32Array BLOB，
+  // 余弦应用层算；model 进行——不同嵌入模型的向量永不混比，换模型由应用层触发重索引。
+  `
+  CREATE TABLE llm_task_routes_v15 (
+    task TEXT PRIMARY KEY CHECK (task IN ('outline', 'draft', 'extract', 'verify', 'embed')),
+    provider_id INTEGER REFERENCES llm_providers(id) ON DELETE SET NULL,
+    model TEXT NOT NULL DEFAULT '',
+    enabled INTEGER NOT NULL DEFAULT 1 CHECK (enabled IN (0, 1)),
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now'))
+  );
+
+  INSERT INTO llm_task_routes_v15 (task, provider_id, model, enabled, updated_at)
+  SELECT task, provider_id, model, enabled, updated_at FROM llm_task_routes;
+
+  DROP TABLE llm_task_routes;
+  ALTER TABLE llm_task_routes_v15 RENAME TO llm_task_routes;
+
+  INSERT OR IGNORE INTO llm_task_routes (task) VALUES ('embed');
+
+  CREATE TABLE doc_embeddings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('material', 'chapter_block')),
+    entity_id INTEGER NOT NULL REFERENCES materials(id) ON DELETE CASCADE,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    vector BLOB NOT NULL,
+    model TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (entity_type, entity_id, chunk_index)
+  );
+
+  CREATE INDEX idx_doc_embeddings_entity ON doc_embeddings(entity_type, entity_id);
+  `,
 ];

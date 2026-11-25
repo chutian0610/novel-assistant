@@ -1,7 +1,7 @@
 import type { DB } from '../db/open';
-import { chatCompletion } from './openai';
+import { chatCompletion, embedCompletion } from './openai';
 import { resolveRoute } from './resolver';
-import type { ChatRequest, ChatResult, LLMProvider, TaskType } from './types';
+import type { ChatRequest, ChatResult, EmbedRequest, EmbedResult, LLMProvider, TaskType } from './types';
 
 export class RouteNotConfiguredError extends Error {
   constructor(task: TaskType) {
@@ -17,6 +17,12 @@ export function createRoutedProvider(db: DB): LLMProvider {
       const route = resolveRoute(db, task);
       if (!route) throw new RouteNotConfiguredError(task);
       return chatCompletion(route, req);
+    },
+    async embed(req: EmbedRequest): Promise<EmbedResult> {
+      // 向量化固定走 embed 任务路由（ollama 本地模型优先，见 V2 spec）
+      const route = resolveRoute(db, 'embed');
+      if (!route) throw new RouteNotConfiguredError('embed');
+      return embedCompletion(route, req);
     },
   };
 }

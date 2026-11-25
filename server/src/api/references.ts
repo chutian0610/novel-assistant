@@ -17,6 +17,7 @@ import {
   createReference,
   type ExtractionStatus,
 } from '../references/store';
+import { syncMaterialEmbedding } from '../embeddings/store';
 import { createMaterial, getMaterial, updateMaterial, type MaterialSource } from '../materials/store';
 import { resolveRoute } from '../llm/resolver';
 import { RouteNotConfiguredError } from '../llm/routed';
@@ -244,6 +245,9 @@ export function referencesRoutes(deps: { db: DB; llm: LLMProvider }) {
         const created = createMaterial(db, { type: item.type, title, content, payload, tags: [], source });
         materialId = created.id;
       }
+      // 入库/合并后同步向量索引（embed 路由未配置或失败不阻塞确认流程，T16）
+      const material = materialId === null ? null : getMaterial(db, materialId);
+      if (material) await syncMaterialEmbedding(db, llm, material);
     }
 
     archiveExtractionItem(db, id, 'accepted', resolution ?? 'new', materialId);
