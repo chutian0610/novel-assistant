@@ -1,5 +1,6 @@
 import { getBook, getBookMaterial, type BookMaterialRecord, type BookRecord } from '../books/store';
 import type { DB } from '../db/open';
+import { embeddingSimilarity, embedRouteModel, getMaterialEmbedding } from '../embeddings/store';
 import { CHARACTER_STATE_CATEGORY_LABELS, listCharacterStates } from '../facts/store';
 import { getAuthorProfileView } from '../profile/store';
 import { buildRecallQuery } from '../materials/search';
@@ -8,6 +9,7 @@ import { getOutlineTree } from '../outlines/store';
 import { getPipelineConfig } from '../pipeline/config';
 import { listChapters } from '../pipeline/store';
 import { estimateTokens } from './tokens';
+import type { LLMProvider } from '../llm/types';
 
 /**
  * 预算装填（T9，CONTEXT.md「注入视图/预算装填」）：为指定章构造实际进入 prompt 的子集。
@@ -19,7 +21,7 @@ import { estimateTokens } from './tokens';
  *   3. outline         必带——该章相关大纲（所属卷纲 + 该章章纲）
  *   4. recentSummaries 必带——前文摘要（近 K 章滚动摘要，0=关闭，T15）
  *   5. characters      必带——出场角色运行时（各角色各类目在目标章前的最新状态）
- *   6. relevance       相关——FTS5(BM25) 检索书内引用素材，按相关度选材、按预算截断
+ *   6. relevance       相关——混合检索书内引用素材，按相关度选材、按预算截断
  *
  * 关键决策：
  * - 章号 → 章纲：章纲无章号字段，按大纲树顺序（卷序 + 卷内序）取第 N 条；超出范围报错。
@@ -28,16 +30,24 @@ import { estimateTokens } from './tokens';
  *   已落库但不进 draft prompt，生成「照章纲盲写」。
  * - 出场角色运行时：写作第 N 章时各角色「此时此刻」= 每角色×类目取 chapter ≤ N 的最新一条
  *   （角色运行时逐章增量语义）；未来章的状态不泄漏，旧状态被新状态取代。
+ * - 混合相关性检索（T17）：BM25 与向量余弦双路召回、RRF 融合名次。向量路是**可选增强**
+ *   （ADR-0002：只影响排序，不是一致性数据源）——embed 路由未配置或查询嵌入失败时
+ *   完全降级回纯 BM25（V1 行为零回归）；向量路只对有当前模型向量的素材生效。
  * - ADR-0002：所有检索/事实条目注入前一律按章节号升序重排；解析不出章节号的排最后。
  * - 必带层永不丢失：预算再小也完整返回（overBudget 标记超额），仅相关性层被截断——
  *   按相关度名次整条取舍、填满即停（截断语义，不取半条、不跳过肥条补瘦条）。
- * - 相关性检索用 OR 召回 + BM25 排序（buildRecallQuery），检索走全局 FTS 索引、
- *   注入用书内覆写后的生效内容（覆写不影响检索索引）。
+ * - 检索走全局索引（FTS 索引 + doc_embeddings 向量），注入用书内覆写后的生效内容。
  */
 export const DEFAULT_BUDGET_TOKENS = 8000;
 
 /** 相关性层候选上限：BM25 名次前 200 的素材才进入装填（V1 规模保险丝） */
 const RELEVANCE_CANDIDATE_LIMIT = 200;
+
+/** 向量召回同样只看前 200（与 BM25 候选同规模保险丝） */
+const VECTOR_CANDIDATE_LIMIT = 200;
+
+/** RRF 融合常数（业界惯例值，平滑单路名次差异） */
+const RRF_K = 60;
 
 export type PackingLayerKey = 'contract' | 'authorProfile' | 'outline' | 'recentSummaries' | 'characters' | 'relevance';
 
@@ -58,8 +68,12 @@ export interface PackingItem {
   tokens: number;
   /** 出处章节号：事实取章号字段，素材解析自出处章文本；用于 ADR-0002 重排 */
   sourceChapter: number | null;
-  /** 相关度名次（1 = BM25 最相关）；仅相关性层条目携带 */
+  /** 相关度名次（1 = 最相关；混合装填时为 RRF 融合名次，降级时即 BM25 名次）；仅相关性层条目携带 */
   rank?: number;
+  /** BM25 单路名次（仅向量路参与装填时携带，T17） */
+  bm25Rank?: number;
+  /** 向量余弦单路名次（仅向量路参与装填时携带，T17） */
+  vectorRank?: number;
 }
 
 export interface PackingLayer {
@@ -107,8 +121,18 @@ export interface FlatChapter {
   chapterSummary: string;
 }
 
-/** 构造指定章的注入视图。前提：书存在（API 层先 requireBook） */
-export function buildInjectionView(db: DB, bookId: number, chapter: number, budget = DEFAULT_BUDGET_TOKENS): InjectionView {
+/**
+ * 构造指定章的注入视图。前提：书存在（API 层先 requireBook）。
+ * 相关性层的查询向量化是可选的 LLM 调用（embed 路由可用才发生，失败自动降级 BM25），
+ * 因此本函数为 async；必带层构造始终是纯确定性计算。
+ */
+export async function buildInjectionView(
+  db: DB,
+  llm: LLMProvider,
+  bookId: number,
+  chapter: number,
+  budget = DEFAULT_BUDGET_TOKENS
+): Promise<InjectionView> {
   const book = getBook(db, bookId);
   if (!book) throw new Error(`书 ${bookId} 不存在（应先由 API 层 404 拦截）`);
   const target = locateChapterOutline(db, bookId, chapter);
@@ -121,7 +145,7 @@ export function buildInjectionView(db: DB, bookId: number, chapter: number, budg
   ];
   // 预算是全视图总账：相关性层只能用必带层之外的剩余额度（必带层永不丢失，额度可为负 → 视为 0）
   const mustTokens = must.reduce((sum, layer) => sum + layer.tokens, 0);
-  const relevance = relevanceLayer(db, bookId, target, Math.max(0, budget - mustTokens));
+  const relevance = await relevanceLayer(db, llm, bookId, target, Math.max(0, budget - mustTokens));
   const layers: PackingLayer[] = [...must, relevance];
   const usedTokens = layers.reduce((sum, layer) => sum + layer.tokens, 0);
   return { bookId, chapter, budgetTokens: budget, usedTokens, overBudget: usedTokens > budget, layers };
@@ -252,32 +276,86 @@ function charactersLayer(db: DB, bookId: number, chapter: number): PackingLayer 
 
 // ---------- 相关性层 ----------
 
-function relevanceLayer(db: DB, bookId: number, target: FlatChapter, allowance: number): PackingLayer {
+/** 单路召回的名次表：materialId → 1 起始名次 */
+type RankMap = Map<number, number>;
+
+/**
+ * 混合相关性检索：BM25 与向量余弦双路召回，RRF 融合名次，按融合名次整条装填。
+ * 降级语义：embed 路由未配置 / 查询嵌入失败 / 素材无当前模型向量时，向量路整体缺席，
+ * 融合退化为纯 BM25（名次与 V1 逐一相同，行为零回归）。
+ */
+async function relevanceLayer(db: DB, llm: LLMProvider, bookId: number, target: FlatChapter, allowance: number): Promise<PackingLayer> {
   const empty = layer('relevance', '相关素材', 'relevance', []);
-  // 查询串 = 该章相关大纲文本（卷纲概要 + 章纲标题 + 章纲概要），OR 召回 + BM25 排序
-  const matchQuery = buildRecallQuery([target.volumeSummary, target.chapterTitle, target.chapterSummary].join(' '));
-  if (!matchQuery) return empty;
+  // 查询串 = 该章相关大纲文本（卷纲概要 + 章纲标题 + 章纲概要）
+  const queryText = [target.volumeSummary, target.chapterTitle, target.chapterSummary].join(' ');
+  // OR 召回 + BM25 排序（buildRecallQuery 无可分词内容时返回 null → BM25 路缺席）
+  const matchQuery = buildRecallQuery(queryText);
 
-  // 只在书内引用素材里召回；rank 为 FTS5 bm25 名次（越小越相关）
-  const rows = db
-    .prepare(
-      `SELECT material_id, rank FROM (
-         SELECT bm.material_id AS material_id,
-                (SELECT rank FROM materials_fts WHERE materials_fts MATCH ? AND rowid = bm.material_id) AS rank
-         FROM book_materials bm WHERE bm.book_id = ?
-       ) WHERE rank IS NOT NULL
-       ORDER BY rank
-       LIMIT ?`
-    )
-    .all(matchQuery, bookId, RELEVANCE_CANDIDATE_LIMIT) as { material_id: number; rank: number }[];
+  // 路 1：FTS5(BM25)，只在书内引用素材里召回（V1 原样）
+  const bm25Ranks: RankMap = new Map();
+  if (matchQuery) {
+    const rows = db
+      .prepare(
+        `SELECT material_id, rank FROM (
+           SELECT bm.material_id AS material_id,
+                  (SELECT rank FROM materials_fts WHERE materials_fts MATCH ? AND rowid = bm.material_id) AS rank
+           FROM book_materials bm WHERE bm.book_id = ?
+         ) WHERE rank IS NOT NULL
+         ORDER BY rank
+         LIMIT ?`
+      )
+      .all(matchQuery, bookId, RELEVANCE_CANDIDATE_LIMIT) as { material_id: number; rank: number }[];
+    rows.forEach((row, index) => bm25Ranks.set(row.material_id, index + 1));
+  }
 
-  // 候选按相关度名次排列，整条预算装填：填满即停（截断语义）；额度是必带层之外的剩余预算
+  // 路 2：向量余弦（T17，可选增强）。查询嵌入失败或路由不可用 → 整路缺席，不阻塞装填。
+  // 不设相似度截断：真实嵌入模型对无关文本也给非零余弦，弱相似素材照进名次，
+  // 由 RRF 权重随名次衰减 + 预算截断自然沉底（截断从融合名次末尾开始）。
+  const vectorRanks: RankMap = new Map();
+  const embedModel = embedRouteModel(db);
+  if (embedModel !== null && queryText.trim() !== '') {
+    try {
+      const [queryVector] = (await llm.embed({ texts: [queryText] })).vectors;
+      if (queryVector) {
+        const referenced = db.prepare('SELECT material_id FROM book_materials WHERE book_id = ? LIMIT ?').all(bookId, VECTOR_CANDIDATE_LIMIT) as {
+          material_id: number;
+        }[];
+        const scored: { materialId: number; similarity: number }[] = [];
+        for (const row of referenced) {
+          const vector = getMaterialEmbedding(db, row.material_id, embedModel);
+          if (!vector) continue; // 缺当前模型向量的素材不参与向量路（失败/未索引的自动跳过）
+          scored.push({ materialId: row.material_id, similarity: embeddingSimilarity(queryVector, vector) });
+        }
+        scored
+          .sort((a, b) => b.similarity - a.similarity || a.materialId - b.materialId)
+          .forEach((entry, index) => vectorRanks.set(entry.materialId, index + 1));
+      }
+    } catch {
+      // 查询嵌入失败 → 降级纯 BM25（装填永不因增强路失败而失败）
+    }
+  }
+  // 单路名次标注只在向量路真正参与时携带（降级即纯 BM25，标注缺席 = V1 形态）
+  const vectorPathUsed = vectorRanks.size > 0;
+
+  // RRF 融合：score = Σ 1/(k+单路名次)；两路全缺的 id 不会出现。融合名次并列时 BM25 优先、再按 id 稳定排序
+  const candidateIds = new Set<number>([...bm25Ranks.keys(), ...vectorRanks.keys()]);
+  const fused = [...candidateIds]
+    .map((materialId) => {
+      const bm25Rank = bm25Ranks.get(materialId);
+      const vectorRank = vectorRanks.get(materialId);
+      let score = 0;
+      if (bm25Rank !== undefined) score += 1 / (RRF_K + bm25Rank);
+      if (vectorRank !== undefined) score += 1 / (RRF_K + vectorRank);
+      return { materialId, bm25Rank, vectorRank, score };
+    })
+    .sort((a, b) => b.score - a.score || (a.bm25Rank ?? Infinity) - (b.bm25Rank ?? Infinity) || a.materialId - b.materialId)
+    .map((entry, index) => ({ ...entry, rank: index + 1 }));
+
+  // 候选按融合名次排列，整条预算装填：填满即停（截断语义）；额度是必带层之外的剩余预算
   let used = 0;
   const kept: PackingItem[] = [];
-  let rank = 0;
-  for (const row of rows) {
-    rank += 1;
-    const item = materialItem(db, bookId, row.material_id, rank);
+  for (const candidate of fused) {
+    const item = materialItem(db, bookId, candidate, vectorPathUsed);
     if (used + item.tokens <= allowance) {
       kept.push(item);
       used += item.tokens;
@@ -285,9 +363,9 @@ function relevanceLayer(db: DB, bookId: number, target: FlatChapter, allowance: 
       break;
     }
   }
-  const droppedCount = rows.length - kept.length;
+  const droppedCount = fused.length - kept.length;
 
-  // ADR-0002：注入顺序一律按章节号升序重排（选材顺序仍由相关度决定）；解析不出章节号的排最后
+  // ADR-0002：注入顺序一律按章节号升序重排（选材顺序仍由融合名次决定）；解析不出章节号的排最后
   kept.sort((a, b) => compareChapter(a.sourceChapter, b.sourceChapter) || a.rank! - b.rank!);
   return {
     key: 'relevance',
@@ -300,8 +378,13 @@ function relevanceLayer(db: DB, bookId: number, target: FlatChapter, allowance: 
   };
 }
 
-function materialItem(db: DB, bookId: number, materialId: number, rank: number): PackingItem {
-  const record = requireBookMaterial(db, bookId, materialId);
+function materialItem(
+  db: DB,
+  bookId: number,
+  candidate: { materialId: number; rank: number; bm25Rank?: number; vectorRank?: number },
+  vectorPathUsed: boolean
+): PackingItem {
+  const record = requireBookMaterial(db, bookId, candidate.materialId);
   // 注入用书内生效视图（覆写后），溯源与章节号取全局素材出处
   const { effective, material } = record;
   const parts = [effective.content, ...Object.entries(effective.payload).filter(([, value]) => value.trim() !== '').map(([key, value]) => `${key}=${value}`)];
@@ -314,7 +397,10 @@ function materialItem(db: DB, bookId: number, materialId: number, rank: number):
     text,
     tokens: estimateTokens(text),
     sourceChapter: parseSourceChapter(material.source.chapter),
-    rank,
+    rank: candidate.rank,
+    // 单路名次仅在向量路参与装填时携带（透明标注混合来源；降级形态与 V1 全同）
+    ...(vectorPathUsed && candidate.bm25Rank !== undefined ? { bm25Rank: candidate.bm25Rank } : {}),
+    ...(vectorPathUsed && candidate.vectorRank !== undefined ? { vectorRank: candidate.vectorRank } : {}),
   };
 }
 

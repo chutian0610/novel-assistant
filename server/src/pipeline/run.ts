@@ -94,11 +94,11 @@ export async function runChapterPipeline(db: DB, llm: LLMProvider, bookId: numbe
     run = getRun(db, bookId, idx)!;
   }
 
-  // ---------- prepare：预算装填构造注入视图（无 LLM 调用） ----------
+  // ---------- prepare：预算装填构造注入视图（embed 路由可用时有可选的查询向量化，失败降级 BM25） ----------
   let view = run.preparedView;
   if (view === null) {
     try {
-      view = buildInjectionView(db, bookId, idx);
+      view = await buildInjectionView(db, llm, bookId, idx);
     } catch (cause) {
       failRun(db, bookId, idx, run.attempts + 1, 'prepare', cause);
     }
