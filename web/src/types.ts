@@ -667,6 +667,12 @@ export interface PipelineSettings {
   recentSummariesLimit: number;
   /** 连续压抑预警窗口（章），与 server pipeline/config.ts 为镜像副本 */
   radarDepressionWindow: number;
+  /** 自相似报告排除窗口（章，0=不排除），镜像副本 */
+  similarityExcludeWindow: number;
+  /** 自相似报告相似度阈值（0~1），镜像副本 */
+  similarityThreshold: number;
+  /** 自相似报告 top-K 对数，镜像副本 */
+  similarityTopK: number;
 }
 
 export type BatchStopReason = 'limit' | 'suspended' | 'error' | 'precondition' | 'none';
@@ -791,4 +797,23 @@ export interface DepressionWarning {
 export interface RadarResponse {
   items: RadarChapterSummary[];
   warning: DepressionWarning | null;
+}
+
+// ---- 跨章自相似（与 server/src/chapterblocks/similarity.ts 为镜像副本，增删字段须两处同步） ----
+
+export interface SimilarPair {
+  aIdx: number;
+  aChunk: number;
+  aExcerpt: string;
+  bIdx: number;
+  bChunk: number;
+  bExcerpt: string;
+  similarity: number;
+}
+
+export interface SimilarityReport {
+  items: SimilarPair[];
+  scannedChapters: number;
+  scannedBlocks: number;
+  model: string | null;
 }

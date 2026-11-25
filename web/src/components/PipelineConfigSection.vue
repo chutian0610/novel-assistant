@@ -10,7 +10,15 @@ const saveError = ref<string | null>(null);
 const saved = ref(false);
 
 // 表单初值仅占位（与服务端默认值一致的写法副本），onMounted 加载后被真实配置整体覆盖
-const form = reactive<PipelineSettings>({ mode: 'collaborative', autoRunLimit: 5, recentSummariesLimit: 3, radarDepressionWindow: 3 });
+const form = reactive<PipelineSettings>({
+  mode: 'collaborative',
+  autoRunLimit: 5,
+  recentSummariesLimit: 3,
+  radarDepressionWindow: 3,
+  similarityExcludeWindow: 5,
+  similarityThreshold: 0.85,
+  similarityTopK: 20,
+});
 
 const MODE_HINTS: Record<InterventionMode, string> = {
   collaborative: '逐章审阅：生成一章停一章，审完草稿再继续；适合逐章把控质量。',
@@ -32,6 +40,9 @@ async function save() {
       autoRunLimit: form.autoRunLimit,
       recentSummariesLimit: form.recentSummariesLimit,
       radarDepressionWindow: form.radarDepressionWindow,
+      similarityExcludeWindow: form.similarityExcludeWindow,
+      similarityThreshold: form.similarityThreshold,
+      similarityTopK: form.similarityTopK,
     });
     Object.assign(form, updated);
     saved.value = true;
@@ -81,6 +92,18 @@ onMounted(async () => {
         <label>
           <span>压抑预警窗口（章）</span>
           <input v-model.number="form.radarDepressionWindow" class="input" type="number" min="1" max="20" step="1" />
+        </label>
+        <label>
+          <span>自相似排除窗口（章）</span>
+          <input v-model.number="form.similarityExcludeWindow" class="input" type="number" min="0" max="50" step="1" />
+        </label>
+        <label>
+          <span>自相似阈值（0~1）</span>
+          <input v-model.number="form.similarityThreshold" class="input" type="number" min="0" max="1" step="0.01" />
+        </label>
+        <label>
+          <span>自相似 top-K（对）</span>
+          <input v-model.number="form.similarityTopK" class="input" type="number" min="1" max="100" step="1" />
         </label>
       </div>
       <p class="muted small">{{ MODE_HINTS[form.mode] }}连跑上限可配 1~20 章，默认 5。生成时自动携带近 N 章滚动摘要（默认 3，0 关闭）；连续 N 章无爽点触发预警（默认 3，需配置爽点评测路由）。</p>

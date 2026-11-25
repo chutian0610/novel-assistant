@@ -10,6 +10,8 @@ import {
   MAX_AUTO_RUN_LIMIT,
   MAX_RADAR_DEPRESSION_WINDOW,
   MAX_RECENT_SUMMARIES_LIMIT,
+  MAX_SIMILARITY_EXCLUDE_WINDOW,
+  MAX_SIMILARITY_TOP_K,
   updatePipelineConfig,
 } from '../pipeline/config';
 import { getAuthorProfileView, updateAuthorProfile } from '../profile/store';
@@ -202,6 +204,23 @@ export function settingsRoutes(deps: { db: DB; llm: LLMProvider }) {
         .int()
         .min(1, '压抑预警窗口至少为 1 章')
         .max(MAX_RADAR_DEPRESSION_WINDOW, `压抑预警窗口最大 ${MAX_RADAR_DEPRESSION_WINDOW} 章`)
+        .optional(),
+      similarityExcludeWindow: z
+        .number()
+        .int()
+        .min(0, '排除窗口不能为负（0 为不排除）')
+        .max(MAX_SIMILARITY_EXCLUDE_WINDOW, `排除窗口最大 ${MAX_SIMILARITY_EXCLUDE_WINDOW} 章`)
+        .optional(),
+      similarityThreshold: z
+        .number()
+        .min(0, '相似度阈值不能为负')
+        .max(1, '相似度阈值不能超过 1')
+        .optional(),
+      similarityTopK: z
+        .number()
+        .int()
+        .min(1, 'top-K 至少为 1')
+        .max(MAX_SIMILARITY_TOP_K, `top-K 最大 ${MAX_SIMILARITY_TOP_K}`)
         .optional(),
     })
     .strict()

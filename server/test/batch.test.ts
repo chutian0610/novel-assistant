@@ -68,17 +68,17 @@ it('管线预设默认值：协作模式 + 连跑上限 5', async () => {
   const env = createTestApp();
   const res = await env.request.get('/api/settings/pipeline');
   expect(res.status).toBe(200);
-  expect(res.body).toEqual({ mode: 'collaborative', autoRunLimit: 5, recentSummariesLimit: 3, radarDepressionWindow: 3 });
+  expect(res.body).toEqual({ mode: 'collaborative', autoRunLimit: 5, recentSummariesLimit: 3, radarDepressionWindow: 3, similarityExcludeWindow: 5, similarityThreshold: 0.85, similarityTopK: 20 });
 });
 
 it('设置中可切换预设与调整连跑上限', async () => {
   const env = createTestApp();
   const put = await setConfig(env.request, { mode: 'auto', autoRunLimit: 3 });
   expect(put.status).toBe(200);
-  expect(put.body).toEqual({ mode: 'auto', autoRunLimit: 3, recentSummariesLimit: 3, radarDepressionWindow: 3 });
+  expect(put.body).toEqual({ mode: 'auto', autoRunLimit: 3, recentSummariesLimit: 3, radarDepressionWindow: 3, similarityExcludeWindow: 5, similarityThreshold: 0.85, similarityTopK: 20 });
 
   const get = await env.request.get('/api/settings/pipeline');
-  expect(get.body).toEqual({ mode: 'auto', autoRunLimit: 3, recentSummariesLimit: 3, radarDepressionWindow: 3 });
+  expect(get.body).toEqual({ mode: 'auto', autoRunLimit: 3, recentSummariesLimit: 3, radarDepressionWindow: 3, similarityExcludeWindow: 5, similarityThreshold: 0.85, similarityTopK: 20 });
 
   // 非法取值被拒
   expect((await setConfig(env.request, { mode: 'yolo' })).status).toBe(400);

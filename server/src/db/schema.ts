@@ -544,4 +544,10 @@ export const MIGRATIONS: readonly string[] = [
 
   CREATE INDEX idx_doc_embeddings_entity ON doc_embeddings(entity_type, entity_id);
   `,
+
+  // v18：跨章自相似报告配置（T20）——排除相邻章窗口 / 相似度阈值 / top-K，存管线预设键值表。
+  `
+  INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES
+    ('similarity_exclude_window', '5'), ('similarity_threshold', '0.85'), ('similarity_top_k', '20');
+  `,
 ];
