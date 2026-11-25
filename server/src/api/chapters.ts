@@ -5,6 +5,7 @@ import { getDetectorConfig } from '../detectors/config';
 import { analyzeText } from '../detectors/metrics';
 import type { DB } from '../db/open';
 import { deleteAutoFacts } from '../facts/store';
+import { syncChapterBlockEmbeddings } from '../embeddings/store';
 import { extractFacts } from '../facts/extract-facts';
 import { RouteNotConfiguredError } from '../llm/routed';
 import type { LLMProvider } from '../llm/types';
@@ -135,6 +136,8 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       wordCount: detection.wordCount,
       metrics: detection.metrics,
     });
+    // 正文块向量随新稿重灌（失败静默：块缺失只影响呼应检索与查重）
+    await syncChapterBlockEmbeddings(db, llm, bookId, idx);
     return c.json(getChapter(db, bookId, idx));
   });
 
@@ -208,6 +211,8 @@ export function chaptersRoutes(deps: { db: DB; llm: LLMProvider }) {
       wordCount: detection.wordCount,
       metrics: detection.metrics,
     });
+    // 正文块向量随回退稿重灌（同编辑规则：失败静默）
+    await syncChapterBlockEmbeddings(db, llm, bookId, idx);
     return c.json(getChapter(db, bookId, idx));
   });
 

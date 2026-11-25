@@ -519,4 +519,29 @@ export const MIGRATIONS: readonly string[] = [
 
   INSERT OR IGNORE INTO pipeline_configs (key, value) VALUES ('radar_depression_window', '3');
   `,
+
+  // v17：正文向量（T19）——doc_embeddings 重建，去掉 v15 误设的 entity_id → materials 外键：
+  // entity_type 预留 chapter_block 时该外键使预留落空（章节行 id 会被 FK 校验拦截）。
+  // 级联改为应用层 hook：素材删除 / 删书 / 章节重灌整章替换，各有明确调用点（见 embeddings/store.ts）。
+  `
+  CREATE TABLE doc_embeddings_v17 (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    entity_type TEXT NOT NULL CHECK (entity_type IN ('material', 'chapter_block')),
+    entity_id INTEGER NOT NULL,
+    chunk_index INTEGER NOT NULL DEFAULT 0,
+    vector BLOB NOT NULL,
+    model TEXT NOT NULL,
+    dim INTEGER NOT NULL,
+    updated_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ', 'now')),
+    UNIQUE (entity_type, entity_id, chunk_index)
+  );
+
+  INSERT INTO doc_embeddings_v17 (id, entity_type, entity_id, chunk_index, vector, model, dim, updated_at)
+  SELECT id, entity_type, entity_id, chunk_index, vector, model, dim, updated_at FROM doc_embeddings;
+
+  DROP TABLE doc_embeddings;
+  ALTER TABLE doc_embeddings_v17 RENAME TO doc_embeddings;
+
+  CREATE INDEX idx_doc_embeddings_entity ON doc_embeddings(entity_type, entity_id);
+  `,
 ];

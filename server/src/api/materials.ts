@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
 import type { DB } from '../db/open';
-import { embedRouteModel, reindexMaterialEmbeddings, syncMaterialEmbedding } from '../embeddings/store';
+import { deleteMaterialEmbeddings, embedRouteModel, reindexMaterialEmbeddings, syncMaterialEmbedding } from '../embeddings/store';
 import type { LLMProvider } from '../llm/types';
 import {
   MATERIAL_TYPES,
@@ -186,8 +186,11 @@ export function materialsRoutes(deps: { db: DB; llm: LLMProvider }) {
   });
 
   app.delete('/materials/:id', (c) => {
-    const deleted = deleteMaterial(db, parseId(c.req.param('id')));
+    const id = parseId(c.req.param('id'));
+    const deleted = deleteMaterial(db, id);
     if (!deleted) throw new HttpError(404, `素材 ${c.req.param('id')} 不存在`);
+    // 向量随素材清理（应用层级联，v17 起无外键）
+    deleteMaterialEmbeddings(db, id);
     return c.body(null, 204);
   });
 

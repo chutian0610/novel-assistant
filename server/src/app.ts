@@ -15,6 +15,7 @@ import { packingRoutes } from './api/packing';
 import { exportRoutes } from './api/export';
 import { referencesRoutes } from './api/references';
 import { radarRoutes } from './api/radar';
+import { chapterBlockRoutes } from './api/chapterblocks';
 import { errorHandler, requestLogger } from './api/middleware';
 
 export interface AppDeps {
@@ -41,6 +42,7 @@ export function createApp(deps: AppDeps) {
   app.route('/api', exportRoutes(deps));
   app.route('/api', referencesRoutes(deps));
   app.route('/api', radarRoutes(deps));
+  app.route('/api', chapterBlockRoutes(deps));
   app.notFound((c) => c.json({ error: '接口不存在' }, 404));
   return app;
 }
